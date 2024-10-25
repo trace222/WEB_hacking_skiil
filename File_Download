@@ -1,0 +1,259 @@
+파일다운로드
+	비정상 경로 다운
+	
+	직접적 방식(url직접 경로), 간접적(db 질의)
+	간접적방식 sql 인젝션
+		String idx =request.getParameter("idx"); -> 검증이 없음
+		pstmt= conn.prepareStatement("select * from"+ tableName + " where gubun='"+gubun+"' and idx="+idx);
+		rs = pstmt.executeQuery() 
+	
+	예시코드
+		php
+		$org_filename=$_GET["org_filename"];
+		$real_filename=$_GET["real_filename"];
+		$filepath = "upload/{$real_filename}";
+		...
+		header("Content-Disposition: attachment' filname={$org_filename}");
+		readfile($filepath);
+		
+		jsp
+		FileInputStream fis =null;
+		BufferedInputStream bis=null;
+		BufferedOutputStream bos =null;
+		
+		String path="C:\\apche ... \\webapps\\ROOT\\upload\\image\\";
+		String org_filename=request.getParameter["org_filename"];
+		String real_filename=request.getParameter["real_filename"];
+		if(org_filename==null|| real_filename==null{~}
+		try{
+			File fd=new File(path + real_filename);
+			if(!fd.exists()){
+				return;
+			}
+			response.setHeader("Content-Disposition", "attachment; filename="+org_filename);
+			re...
+			
+			fis=new FileInputStream(fd);
+			bis = new BufferedInputStream(fis);
+			bos = new BufferedOutputStream(response.getOutputStream());
+			
+			while((i=(bis.read(buffer)))!=-1){
+				bos.write(buffer,0,i);
+			}
+			bos.flush();
+			
+		}finally
+		{if(fis!=null){fis.close()}
+			if(bis...
+			if(bos...
+			
+		}
+		
+	공격 방법
+		1.파일 네임만 받기
+			filename=../../../../etc/passwd
+			(win)filename = ../../index.jsp (웹디렉터리가 아니면 win은 받기힘들다)
+		2. path, 파일 네임 받기
+			path=../../../etc&filename=passwd
+			(win)path=../../&filename=index.jsp
+		3. 절대경로 ,파일 네임 받기
+			path=/jeus/sebhome/...&filename=test.png
+			-> path=/etc&filename=passwd // ../ 이런 방식이 안사용, 이에받는 대응방안
+			(win)path=c:/windows/system32/drivers/etc&filename=hosts
+		os별 경로 구분
+			windows - /, \ (2개다 체크)
+			unix,linux - /
+			
+	공격 프로세스 
+		공격대상 탐색
+			사이트 확인
+				게신판 및 ci페이지
+			html코드
+			js코드
+			유추
+			구글링 
+				site: , inurl:download.jsp
+		환경분석
+			os파악
+				대소문자
+			언어파악
+				언어, 서버, 에러페이지
+		파다 공격
+			-공격 방법-
+			
+		검증로직 파악
+			응답메시지(해당파일 없습니다~, 비정상~) -> 검증로직, 올바른 파일 지정
+			400 bad request -> 솔루션 차단, 요청 오류
+			/ , ./, .. , ../ - linux 각각 반응 분석 ,확장자 검증 여부 파악
+			"/, \", "./ , .\" , "..", "../, ..\" window 반응 분석
+				image\1234.jpg == image\/1234.jpg == image\//////1234.jpg
+				
+				image\12/34.jpg, 12..34.jpg 이런거 해봐서 /처리되는건지 제거가되는건지 확인
+					-> 응답 내 content-disposition: filename=etc/passwd (org_filename) 이렇게 검증 처리된 값이 있을수 있다, org는 동일하게 검증로직이 적응되므로 보고 판단
+					-> 검증 로직이 되는지 파악하기 힘들경우 해당 부분으로 비교판단
+				filename = ..%5c..%5cindex.jsp
+			ips에서 url 인코딩이 아직 검증 안하는경우 다수
+				-> %2e%2e%2f
+		간단 실습
+			1. common.js 파일 확인후 다운로드 모듈 , url 확인
+				location.href= ~~체크후 그대로 패킷 만들기
+				get /example/ex1/download.php?path=~
+			2. 주석 처리된 이전 download2.jsp 찾기 -> download.jsp -> download2.jsp 유추
+			3. file_download.php ->url 유추 -> 응답값 내 인자값 비정상뜨면 찾은거 -> 파라미터도 유추 -> file, filename 등
+				../../../index.html
+			
+			
+	심화공격
+		웹 디렉터리 파악
+			웹디렉터리O			
+			상위디렉터리로 한칸식 이동하여 인덱스 파일 또는 설정 파일 다운로드
+			다운로드 성공시 웹디렉터리 실패시 웹디렉이 아니라고 판단	
+				JAVA WEB APPLICATION 경우 웹서버가 아닌 WAS 웹 디렉 체크
+					JAVA - index.html, index.jsp, /WEB-INF/web.xml, /WEB-INF/jsp/index.jsp
+					PHP - index.html, index.php, .htaccess
+					ASP, .NET(ASPX) - index.html, default.html, default.asp, default.aspx, index.asp, index.aspx, web.config, global.asa
+			웹디렉터리X
+				웹 디렉터리 경로 획득
+				관련 파일 다운로드, 서버설정/웹서버(WAS)설정 파일, 히스토리파일 등등 ( 윈도우는 제외)
+					/proc/self/cmdline, /proc/self/environ, /etc/profile, .bash_profile, .profile
+					[JAVA- TOMCAT] /conf/server.xml, 
+					[JAVA- JEUS] /config/[hostname]/JEUSMain.xml
+					[JAVA-Weblogic] /config/config.xml 
+					[php-apache] /conf/httpd.conf
+					.bash_history, .csh_history, .sh_history
+				홈 디렉터리 파악 - /etc/passwd
+				/etc/passwd -> 히스토리 파일 -> 웹 서버 설정파일 -> 웹디렉터리 경로획득
+				or 서버 설정파일 -> 웹서버 설정파일 -> 웹디렉터리 경로획득
+				
+				
+		정보 수집 및 분석
+			파일 업로드 경로 파악 -> 파일 업로드 소스코드 다운 분석
+			웹 소스코드 다운로드 통한 웹 로직 분석 -> 해당 어플리케이션 소스코드 다운로드 분석 (실력향상)
+			/WEB-INF/web.xml 다운로드 통한 정보획득
+			웹서버 설정 파일 다운로드 정보획득
+			히스토리 파일 분석 다운로드
+		
+		실무사례
+			1.te../st.jsp 등으로 체크
+			../../index.jsp 다운 -> 웹디렉터리 
+			../../download.jsp 다운로드 해서 분석 was 경로 획득
+			웹쉘경로 획득 접근
+			
+			2../etc/passwd 로 홈디렉터리 정보 수집
+			../../root/.bash_history 안됨
+			.../../home/test123/.bash_history 됨 또는 /proc/self/environ 등으로 획득 가능
+				-> 톰캣 설치 정보 획득
+			../../usr/local/tomcat/conf/server.xml 
+				-> <context paht="/example" docBase="/~~/example">
+				-> 웹디렉터리 주소 획득 가능
+			~~/example/index.html, ~~/example/WEB-INF/web.xml 다운가능 찾은거 확정
+			웹디렉터리 획득 후 기존 업로드 경로(upload.jsp 내 저장 소스코드)는 실행권한이 없어 다른폴더 또는 획득한 웹디렉터리로 경로 변조
+			
+			3. ../../../../..//../index.jsp 없음, ../../../../../WEB-INF/web.xml 없음 -> 웹디x
+			업로드 경로 없음
+			톰캣-> 톰캣 매니저 접근 manager
+			../../etc/passwd 홈디렉 확인후
+			히스토리 획득
+			../../usr/local/tomcat/conf/tomcat-users.xml
+				-> 톰캣 계정 획득
+				-> war파일 업로드
+			
+			요즘은 정보획득이 어려워 로그나, 히스토리 의존
+	
+	실무 예시
+		1. .. o , ../ 제거,
+			....// 이용하여 다운로드
+		2. / 에러 처리
+			\는 정상, 삭제안됨
+			..\..\file_download
+		3. path, filename 
+			filename에 /\불가
+			path 에 가능 ./, / , \앞에 추가시 경로 실패 -> 검증
+				맨 뒤 / . 는 사용가능
+					-> upload/images/../../ 이렇게 사용가능, upload/images/../images 이렇게 체크
+					= 앞에 len 등을 이용하여 검증 추측
+					-> upload/images/../../../../../
+		4. base64 인코딩
+			ctrl+shift+b -> base64 디코딩 
+			디코딩해서 변경후 인코딩 하여 전송
+		
+		5. 솔루션
+			../../../ 이렇게 몇개이상 하면 걸림
+			////, \\\\ 이것도 걸림
+			.././../ 이렇게 하면 우회 -> ./ 로 연속을 막음
+			
+		6. ./ ,../ , ..\ , .\ 제거
+			순서가 중요
+			../ -> 파일이 존재하지않는다, te...//st -> 정상 다운 
+				-> ./ , .\ 부터 제거 후 ../ 제거
+			...../// -> 이렇게하면 제거된후 ../만 남게된다.
+		
+		7. / , .. 제거됨
+		\ 는 제가안됨
+		-> ./. 으로 순서 체크
+			/ -> .. 제거시 이미지 정상 다운
+			.. -> / 제거시 이미지 다운x
+				-> ./. -> ..test.jsp 이렇게 됨
+				-> ./.\ => ..\ 
+				-> ./.\./.\./.\./.\./.\./.\./.\./.\etc\passwd
+		
+		8. 파일 업로드 시 다운로드 취약점 등록 ( ajax 동적 시 발생)
+			파일명으로 ../../../etc/passwd 형태 로 삽입 -> db 에 해당 명으로 저장됨 -> 다운로드 및 불러올시 해당 다운로드됨
+			file= ../index.php 업로드 후 download 에서 seq=3 이렇게 다운 시 해당 인덱스가 다운됨
+			
+			수정페이지에서도 변경 가능
+				-> 수정페이지에서는 별도로 되는 경우 존재
+					=> old_file 과 비교하는 (if) 때문에 db에 파일명 등으로 질의 되는 점 때문에 발생
+				$query = ~~idx={$idx}; 
+				쿼리 받고 검증안하고 바로  $db_conn->query($query) 진행 시
+				$filename= $row["file"];
+				$filepath = "{$filepath}/{$filename}" 이렇게 내부 그대로 사용될수 있다.
+				
+				$file= $db_conn->real_escape_string($file);
+				$query = update ~~ new_file="{$file}" where idx={$idx} ~ -> new file 명에 사용가능
+				
+				파일명등에 . 이거 빼고는 필터링 필요
+					$filename=str_replace("\\","/", $filename);
+					if(strpos($filename, "/") || strpos($filename,"..")!== false{
+						에러처리
+					}
+				
+			
+	대응 방안
+		전체경로 + 파일명
+			이거는 아래 3개 유형으로 바꾸는 것이 우선
+			
+		일부 경로 + 파일명
+			gubun = gubun.replace("\\", "/");
+			filename = filename.replace("\\","/");
+			if(gubun.indexOf("/")!=-1 || ~~ filename.indexOf("..") != -1) .. , / 체크
+			{ 체크체크 }
+		
+		파일명
+			filename = filename.replace("\\","/");
+			if( filename.indexOf("..") != -1  ~~ ) .. , / 체크
+			{ 체크체크 }	
+		
+		key 값(idx)
+			Integer idx= Integer.parseInt(request.getParameter("IDX")) ; -> 이미 INTEGER 이므로 인젝션에 안전
+			pstmt = conn.prepareStatement("select * from board_file where idx=?"); // prepareStatement 로 인젝션 방어
+			pstmt.setInt(1,idx);//인덱스를 int 값으로 지정 숫자형 100으로 변경하고 싶으면 setInt(1, 100) 형식으로 작성
+			re = pstmt.executeQuery();
+		
+		php 는
+			if(empty($filename)) ~
+			str_replace("\\", "/", $filename) // php는 이거 안하나? 공백 제거도
+			if(strpos($filename,"/" !== false ~~) /, ..
+			
+		jsp
+			gubun = gubun.replace("\\", "/");
+			filename = filename.replace("\\","/");
+			if(gubun.indexOf("/")!=-1 || ~~ filename.indexOf("..") != -1) .. , / 체크
+			{ 체크체크 }
+			
+		주통기 에러
+			filename.equalsIgnoreCase(".") || filename.equalsIgnoreCase("/") || filename.equalsIgnoreCase("\") 
+			-> equalsIgnoreCase 는  = 연산자 기능이기 때문에 ../파일 을 검증못한다.
+
+	
+		
